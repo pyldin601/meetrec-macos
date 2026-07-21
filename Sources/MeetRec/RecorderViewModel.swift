@@ -163,13 +163,14 @@ final class RecorderViewModel {
     /// recording, a device click switches mic capture into a new segment;
     /// None ends mic capture while the session continues (SPEC.md §1.3).
     func selectMic(_ id: AudioDeviceID?) async {
-        micResumeArmed = false
         switch state {
         case .idle:
+            micResumeArmed = false
             selectedMicID = id
         case .recording:
             guard let session, !micTransitionInProgress else { return }
             guard let id else {
+                micResumeArmed = false
                 // The menu disables None while the mic is the sole active
                 // source; guard anyway so a stale menu can't end the session.
                 if session.isSystemAudioActive {
@@ -180,6 +181,10 @@ final class RecorderViewModel {
             }
             if id == selectedMicID, session.isMicActive { return }
             guard let device = mics.first(where: { $0.id == id }) else { return }
+            // The click is accepted from here on, so it now counts as an
+            // explicit selection (SPEC.md §3.2 — disarms auto-resume).
+            // Dropped clicks above must leave a pending auto-resume armed.
+            micResumeArmed = false
 
             micTransitionInProgress = true
             defer { micTransitionInProgress = false }
@@ -189,16 +194,25 @@ final class RecorderViewModel {
                 lastError = Self.micDeniedMessage
                 return
             }
-            // Re-validate across the await: the session may have stopped and
+            // Re-validate across the await: the session may have stopped —
+            // or been replaced by a new one this click never targeted — and
             // the device may be gone.
-            guard case .recording = state, let liveSession = self.session,
-                  MicrophoneDeviceProvider.isAlive(device.id)
-            else { return }
+            guard case .recording = state, self.session === session else { return }
+            guard MicrophoneDeviceProvider.isAlive(device.id) else {
+                // The click attached nothing; restore the auto-resume promise
+                // if the session is running without a mic. (.recording with
+                // no active mic implies system audio is active — a mic-only
+                // session would have stopped instead.)
+                if !session.isMicActive {
+                    micResumeArmed = true
+                    scheduleAutoResumeIfNeeded()
+                }
+                return
+            }
             let previousID = selectedMicID
             do {
-                try liveSession.attachMic(device)
+                try session.attachMic(device)
                 selectedMicID = device.id
-                micResumeArmed = false
             } catch {
                 // Silent recovery per SPEC.md §3.3; alert only on total loss.
                 if !recoverMic(preferring: previousID, excludingUID: device.uid) {
@@ -213,7 +227,11 @@ final class RecorderViewModel {
     private func handleMicDeath(dead: MicDevice, reason: String) {
         guard case .recording = state else { return }
         refreshMics()
-        if micRestartAllowed(), recoverMic(preferring: dead.id) {
+        // The flapping cap never applies when the mic is the only source —
+        // skipping recovery there would end the whole recording (SPEC.md
+        // §3.2 reserves stopping for "no replacement").
+        let systemAudioActive = session?.isSystemAudioActive ?? false
+        if micRestartAllowed() || !systemAudioActive, recoverMic(preferring: dead.id) {
             return
         }
         armForResumeOrStop(reason: reason)
@@ -262,6 +280,9 @@ final class RecorderViewModel {
 
     private func armForResumeOrStop(reason: String) {
         guard let session, session.isSystemAudioActive else {
+            // Sole source lost: the selection resets to None (SPEC.md §3.2)
+            // even when the dead device is still enumerated by CoreAudio.
+            selectedMicID = nil
             Task { await stopRecording(reason: reason) }
             return
         }
@@ -280,9 +301,14 @@ final class RecorderViewModel {
 
     private func autoResumeMicIfNeeded() {
         guard micResumeArmed, isRecording, !micTransitionInProgress,
-              let session, !session.isMicActive, !mics.isEmpty,
-              micRestartAllowed()
+              let session, !session.isMicActive, !mics.isEmpty
         else { return }
+        guard micRestartAllowed() else {
+            // Rate-limited right now; keep the retry chain alive so resume
+            // fires once the 30 s window drains (no device event will).
+            scheduleMicResumeRetry()
+            return
+        }
         if !recoverMic(preferring: MicrophoneDeviceProvider.defaultInputDeviceID()) {
             // A freshly plugged device may not publish streams yet.
             scheduleMicResumeRetry()

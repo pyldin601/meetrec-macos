@@ -35,6 +35,8 @@ The project is a plain Swift package; a small Makefile assembles the `.app` bund
 
 ```sh
 make run        # build release, assemble dist/MeetRec.app, and open it
+make dev        # run the bundled app attached to the terminal, streaming its
+                # unified logs (⌃C or Quit MeetRec stops both)
 make app        # just build + assemble the bundle
 make CONFIG=debug app
 swift run       # dev loop without the bundle (works; the Info.plist is embedded in the binary)
@@ -59,7 +61,9 @@ rebuilds and macOS may occasionally re-ask for these permissions after you rebui
 
 - **System audio** — the menu offers **All Apps** or **None**. The capture engine supports
   per-app process taps, but per-app selection is deliberately not exposed in the menu
-  (see [SPEC.md](SPEC.md) §6).
+  (see [SPEC.md](SPEC.md) §6). The system track is wall-clock continuous — quiet stretches
+  are recorded as silence (padded in if the OS delivers no data), so it always spans the
+  whole session and lines up with the mic segments.
 - **Microphone** — the submenu lists the currently connected input devices and refreshes as
   they come and go. It defaults to the system default input; the selection resets to None
   when the selected device disappears while idle. The submenu stays enabled while

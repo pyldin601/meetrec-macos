@@ -97,6 +97,10 @@ Top to bottom:
   until free.
 - Mic segments that captured nothing are deleted; the system-audio file never
   segments.
+- The system-audio file is **wall-clock continuous**: stretches where nothing
+  is playing are recorded as silence (padded in if the OS delivers no data),
+  so it always spans the whole session and stays aligned with the mic
+  segments.
 - Files are written as streaming AAC while recording (no post-processing step).
 
 ### 3.2 Session lifecycle
@@ -112,7 +116,10 @@ Top to bottom:
   configuration change that stops its engine), capture restarts into a new
   segment file (§3.1) on the first working candidate of: the same device (if
   still alive), the current system default input, any other connected input.
-  Success is silent — only the menu checkmark moves.
+  Success is silent — only the menu checkmark moves. Automatic restarts are
+  rate-limited (about 6 per 30 s, guarding against flapping devices); while
+  rate-limited the microphone behaves as lost (below) until the window
+  drains. The limit never applies when the microphone is the only source.
 - **No replacement:** if no input device can be attached, mic capture ends;
   the session continues if system audio is being captured (an alert says
   so), and auto-resume arms. If the microphone was the only source, the

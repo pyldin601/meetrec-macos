@@ -98,7 +98,9 @@ final class RecordingSession {
         }
         if let micCapture {
             micCapture.stop()
-            micWriter?.finalize()
+            // Same as finalize() for any segment with content; deletes a
+            // zero-frame final segment per SPEC.md §3.1.
+            micWriter?.discardIfEmpty()
         }
     }
 
