@@ -1,5 +1,4 @@
 import AppKit
-import CoreAudio
 
 /// The app's entire UI: a menu bar status item — record icon while idle,
 /// stop icon + ticking elapsed time while recording — with a menu to
@@ -22,10 +21,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     // MARK: - Menu
 
-    /// Rebuilt on every open: the device list, checkmarks, titles, and
-    /// enabling all depend on current state.
+    /// Rebuilt on every open: checkmarks, titles, and enabling all depend
+    /// on current state.
     func menuNeedsUpdate(_ menu: NSMenu) {
-        model.refreshMics()
         menu.removeAllItems()
 
         let toggle = NSMenuItem(
@@ -39,15 +37,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
         menu.addItem(.separator())
         menu.addItem(.sectionHeader(title: "System Audio"))
-        addSourceItem("All Apps", checked: model.systemAudioEnabled, action: #selector(selectAllApps))
+        addSourceItem("All Apps", checked: model.systemAudioEnabled, action: #selector(selectSystemAudio))
         addSourceItem("None", checked: !model.systemAudioEnabled, action: #selector(selectNoSystemAudio))
 
         menu.addItem(.sectionHeader(title: "Microphone"))
-        for mic in model.mics {
-            addSourceItem(mic.name, checked: model.selectedMicID == mic.id, action: #selector(selectMic(_:)))
-                .representedObject = mic.id
-        }
-        addSourceItem("None", checked: model.selectedMicID == nil, action: #selector(selectNoMic))
+        addSourceItem("Default", checked: model.micEnabled, action: #selector(selectMic))
+        addSourceItem("None", checked: !model.micEnabled, action: #selector(selectNoMic))
 
         menu.addItem(.separator())
         // Our own selector, not NSApplication.terminate(_:) — macOS 26 auto-
@@ -57,16 +52,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(quit)
     }
 
-    /// Sources are frozen while recording; switching mid-session arrives
-    /// with the capture engine.
-    @discardableResult
-    private func addSourceItem(_ title: String, checked: Bool, action: Selector) -> NSMenuItem {
+    /// Sources are frozen while recording.
+    private func addSourceItem(_ title: String, checked: Bool, action: Selector) {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = self
         item.state = checked ? .on : .off
         item.isEnabled = !model.isRecording
         menu.addItem(item)
-        return item
     }
 
     // MARK: - Actions
@@ -76,7 +68,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         refresh()
     }
 
-    @objc private func selectAllApps() {
+    @objc private func selectSystemAudio() {
         model.systemAudioEnabled = true
     }
 
@@ -84,13 +76,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         model.systemAudioEnabled = false
     }
 
-    @objc private func selectMic(_ sender: NSMenuItem) {
-        guard let id = sender.representedObject as? AudioDeviceID else { return }
-        model.selectedMicID = id
+    @objc private func selectMic() {
+        model.micEnabled = true
     }
 
     @objc private func selectNoMic() {
-        model.selectedMicID = nil
+        model.micEnabled = false
     }
 
     @objc private func quit(_ sender: Any?) {

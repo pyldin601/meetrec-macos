@@ -1,4 +1,3 @@
-import CoreAudio
 import Foundation
 
 @MainActor
@@ -7,29 +6,15 @@ final class RecorderViewModel {
     /// the elapsed display (and later, file naming) derives from.
     private(set) var recordingStartDate: Date?
 
-    /// System audio selection: true = All Apps (the default), false = None.
+    // Source selections, frozen by the menu while recording.
+    /// true = All Apps, false = None.
     var systemAudioEnabled = true
-    /// nil = None. Preselected to the system default input on first refresh.
-    var selectedMicID: AudioDeviceID?
-    private(set) var mics: [MicDevice] = []
-    private var didPreselectMic = false
+    /// true = the system default input (follows the OS when devices come
+    /// and go), false = None.
+    var micEnabled = true
 
     var isRecording: Bool { recordingStartDate != nil }
-    var canRecord: Bool { systemAudioEnabled || selectedMicID != nil }
-
-    func refreshMics() {
-        mics = MicrophoneDeviceProvider.inputDevices()
-        if !didPreselectMic {
-            didPreselectMic = true
-            selectedMicID = MicrophoneDeviceProvider.defaultInputDeviceID()
-        }
-        // While idle, a vanished device resets the selection to None. While
-        // recording that is failover territory — arrives with the capture
-        // engine.
-        if !isRecording, let id = selectedMicID, !mics.contains(where: { $0.id == id }) {
-            selectedMicID = nil
-        }
-    }
+    var canRecord: Bool { systemAudioEnabled || micEnabled }
 
     func startRecording() {
         guard !isRecording, canRecord else { return }
