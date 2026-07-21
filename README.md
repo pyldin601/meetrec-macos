@@ -1,18 +1,23 @@
 # MeetRec
 
-A native macOS app that records meeting audio from two sides at once:
+A native macOS **menu bar** app that records meeting audio from two sides at once:
 
-- **App / system audio** — the sound produced by a selected running application, or the whole
-  system mix, captured with **CoreAudio process taps** (the same audio-only mechanism used by
-  meeting recorders like Granola — no Screen Recording permission involved).
+- **System audio** — the whole system output mix (excluding MeetRec itself), captured with
+  **CoreAudio process taps** (the same audio-only mechanism used by meeting recorders like
+  Granola — no Screen Recording permission involved).
 - **Microphone** — a selected input device, captured raw (no voice processing) with
   **AVAudioEngine**.
+
+There are no windows and no Dock icon: the entire UI is a status item in the menu bar — a
+record icon while idle, a stop icon plus the elapsed time while recording — with a menu to
+start/stop the recording, pick the sources (System Audio: All Apps or None; Microphone: any
+connected input device or None), and quit.
 
 Each recording session writes separate AAC files into `~/MeetRecRecordings`, sharing one
 CLI-friendly digits-only timestamp prefix:
 
 ```
-20260721143005-app.m4a      (48 kHz stereo, 160 kbps; "-system" when capturing the system mix)
+20260721143005-system.m4a   (48 kHz stereo, 160 kbps)
 20260721143005-mic.m4a      (48 kHz, mono 96 kbps or stereo 160 kbps, matching the device)
 ```
 
@@ -52,17 +57,20 @@ rebuilds and macOS may occasionally re-ask for these permissions after you rebui
 
 ## Behavior details
 
-- **Source list** — the app dropdown shows applications that are registered with CoreAudio,
-  which means apps that have played (or captured) audio at some point since launch. An app
-  that hasn't touched audio yet won't be listed; pick **System audio (all apps)** to capture
-  everything regardless (MeetRec's own audio is excluded).
-- **Stop conditions** — pressing Stop, the captured app quitting, or the microphone
-  disconnecting all stop the whole session and finalize every file; partial recordings are
-  always kept.
-- Quitting the app (or closing its window) during a recording finalizes the files first.
+- **System audio** — the menu offers **All Apps** or **None**. The capture engine supports
+  per-app process taps, but per-app selection is deliberately not exposed in the menu
+  (see [SPEC.md](SPEC.md) §6).
+- **Microphone** — the submenu lists the currently connected input devices and refreshes as
+  they come and go. It defaults to the system default input; the selection resets to None
+  when the selected device disappears while idle.
+- **Stop conditions** — choosing Stop Recording, the selected microphone disconnecting, or
+  quitting the app all stop the whole session and finalize every file; partial recordings
+  are always kept.
+- Quitting the app during a recording finalizes the files first.
+- Failures (capture start failure, denied permission, a source dying mid-recording) surface
+  as standard alerts; permission errors offer a button opening the relevant System Settings
+  pane.
 - While recording, the system is kept from idle-sleeping (`ProcessInfo.beginActivity`).
-- Audio capture is per-process on macOS — there is no per-window audio, which is why the
-  picker selects applications rather than windows.
 - Files are written as streaming AAC; if the app dies mid-recording the file may be missing
   its header. Stop recordings normally.
 

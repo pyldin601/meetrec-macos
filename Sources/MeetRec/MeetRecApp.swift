@@ -1,37 +1,31 @@
 import AppKit
-import SwiftUI
 
 @main
-struct MeetRecApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var model = RecorderViewModel()
-
-    var body: some Scene {
-        WindowGroup {
-            ContentView(model: model)
-                .onAppear { appDelegate.model = model }
-        }
-        .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentSize)
+@MainActor
+enum MeetRecMain {
+    static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        app.run()
     }
 }
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    var model: RecorderViewModel?
+    private let model = RecorderViewModel()
+    private var statusItemController: StatusItemController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Makes bare `swift run` behave like a real app (Dock icon, focus).
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        // LSUIElement covers the assembled bundle; set the policy explicitly
+        // so bare `swift run` is also windowless with no Dock icon.
+        NSApp.setActivationPolicy(.accessory)
+        model.bootstrap()
+        statusItemController = StatusItemController(model: model)
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let model, model.state != .idle else { return .terminateNow }
+        guard model.state != .idle else { return .terminateNow }
         // Finalize the recording files before allowing termination.
         Task {
             await model.shutDown()
