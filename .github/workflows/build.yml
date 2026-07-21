@@ -9,14 +9,14 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - name: Show Xcode version
-        run: xcodebuild -version
-      - name: Build
-        run: |
-          xcodebuild \
-            -project MeetRec.xcodeproj \
-            -scheme MeetRec \
-            -configuration Release \
-            -destination 'generic/platform=macOS' \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            build
+      - name: Show toolchain
+        run: swift --version
+      - name: Build app bundle
+        run: make app
+      - name: Zip app (preserves permissions)
+        run: ditto -c -k --keepParent dist/MeetRec.app dist/MeetRec.app.zip
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MeetRec.app
+          path: dist/MeetRec.app.zip
