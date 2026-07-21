@@ -12,6 +12,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
     private var elapsedTimer: Timer?
+    private var pendingAlerts: [String] = []
+    private var isPresentingAlerts = false
 
     init(model: RecorderViewModel) {
         self.model = model
@@ -50,9 +52,11 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         systemItem.isEnabled = idle
         menu.addItem(systemItem)
 
+        // Unlike System Audio, the mic stays switchable mid-recording — each
+        // change continues into a new segment file (SPEC.md §1.3).
         let micItem = NSMenuItem(title: "Microphone", action: nil, keyEquivalent: "")
         micItem.submenu = microphoneSubmenu()
-        micItem.isEnabled = idle
+        micItem.isEnabled = idle || model.isRecording
         menu.addItem(micItem)
 
         menu.addItem(.separator())
@@ -96,6 +100,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let none = NSMenuItem(title: "None", action: #selector(selectNoMicrophone), keyEquivalent: "")
         none.target = self
         none.state = model.selectedMicID == nil ? .on : .off
+        none.isEnabled = !model.isMicSoleActiveSource
         submenu.addItem(none)
 
         return submenu
@@ -122,13 +127,13 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     @objc private func selectMicrophone(_ sender: NSMenuItem) {
-        guard model.state == .idle, let number = sender.representedObject as? NSNumber else { return }
-        model.selectedMicID = AudioDeviceID(number.uint32Value)
+        guard let number = sender.representedObject as? NSNumber else { return }
+        let id = AudioDeviceID(number.uint32Value)
+        Task { await model.selectMic(id) }
     }
 
     @objc private func selectNoMicrophone() {
-        guard model.state == .idle else { return }
-        model.selectedMicID = nil
+        Task { await model.selectMic(nil) }
     }
 
     @objc private func quit() {
@@ -198,9 +203,21 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func presentPendingError() {
-        guard let message = model.lastError else { return }
-        model.lastError = nil
+        if let message = model.lastError {
+            model.lastError = nil
+            pendingAlerts.append(message)
+        }
+        // runModal drains the main queue, so another error can be observed
+        // while an alert is up; queue it instead of nesting modal sessions.
+        guard !isPresentingAlerts else { return }
+        isPresentingAlerts = true
+        defer { isPresentingAlerts = false }
+        while !pendingAlerts.isEmpty {
+            presentAlert(pendingAlerts.removeFirst())
+        }
+    }
 
+    private func presentAlert(_ message: String) {
         let alert = NSAlert()
         alert.messageText = "Recording Error"
         alert.informativeText = message

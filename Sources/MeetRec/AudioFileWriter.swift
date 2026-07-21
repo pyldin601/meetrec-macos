@@ -5,13 +5,16 @@ import os
 /// Streams PCM buffers into an AAC (.m4a) file, converting sample rate,
 /// channel count, and layout as needed.
 ///
-/// Thread contract: `write` is only called from a single capture context (the
-/// SCStream sample-handler queue, or the AVAudioEngine tap thread).
-/// `finalize`/`discardIfEmpty` may be called from elsewhere, but only after
-/// capture has fully stopped and no further `write` can occur.
+/// Thread contract: `write` is called from a single capture context (the
+/// process-tap IO queue, or the AVAudioEngine tap thread) and may race
+/// `finalize`/`discardIfEmpty` from another thread — AVAudioEngine does not
+/// guarantee that stopping drains an in-flight tap block, and mic segments
+/// now end mid-recording (failover, manual switch). An internal lock
+/// serializes them: a `write` that loses the race with `finalize` is a no-op.
 final class AudioFileWriter {
     let url: URL
 
+    private let lock = NSLock()
     private var file: AVAudioFile?
     private var converter: AVAudioConverter?
     private var framesWritten: Int64 = 0
@@ -34,6 +37,8 @@ final class AudioFileWriter {
     }
 
     func write(_ buffer: AVAudioPCMBuffer) {
+        lock.lock()
+        defer { lock.unlock() }
         guard let file, buffer.frameLength > 0 else { return }
         if buffer.format == file.processingFormat {
             do {
@@ -50,14 +55,20 @@ final class AudioFileWriter {
     /// Closes the file. The M4A header is finalized when the AVAudioFile is
     /// released (macOS 14 has no explicit close()).
     func finalize() {
+        lock.lock()
+        defer { lock.unlock() }
         converter = nil
         file = nil
     }
 
-    /// Rollback path: closes the file and removes it when nothing was written.
+    /// Closes the file and removes it when nothing was written. Used for
+    /// start-failure rollback and for mic segments that end mid-recording.
     func discardIfEmpty() {
+        lock.lock()
         let isEmpty = framesWritten == 0
-        finalize()
+        converter = nil
+        file = nil
+        lock.unlock()
         if isEmpty {
             try? FileManager.default.removeItem(at: url)
         }

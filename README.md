@@ -62,10 +62,17 @@ rebuilds and macOS may occasionally re-ask for these permissions after you rebui
   (see [SPEC.md](SPEC.md) §6).
 - **Microphone** — the submenu lists the currently connected input devices and refreshes as
   they come and go. It defaults to the system default input; the selection resets to None
-  when the selected device disappears while idle.
-- **Stop conditions** — choosing Stop Recording, the selected microphone disconnecting, or
-  quitting the app all stop the whole session and finalize every file; partial recordings
-  are always kept.
+  when the selected device disappears while idle. The submenu stays enabled while
+  recording: picking another device (or None) switches mic capture mid-session into a new
+  `-mic-HHMMSS.m4a` segment file (named by its offset from the session start).
+- **Mic failover** — if the mic dies mid-recording, MeetRec silently restarts capture on
+  another input (the same device if it recovers, else the system default, else any input)
+  as a new segment file. With no replacement available the session continues on system
+  audio alone and the mic auto-resumes when an input device reappears; only when the mic
+  was the only source does the session stop.
+- **Stop conditions** — choosing Stop Recording, quitting the app, or losing the only
+  active source with no replacement all stop the whole session and finalize every file;
+  partial recordings are always kept.
 - Quitting the app during a recording finalizes the files first.
 - Failures (capture start failure, denied permission, a source dying mid-recording) surface
   as standard alerts; permission errors offer a button opening the relevant System Settings
