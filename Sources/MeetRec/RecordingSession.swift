@@ -41,7 +41,7 @@ final class RecordingSession {
 
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        formatter.dateFormat = "yyyyMMddHHmmss"
         let stamp = formatter.string(from: Date())
 
         do {
@@ -72,7 +72,7 @@ final class RecordingSession {
     }
 
     private func startAppCapture(target: CaptureTarget, into directory: URL, stamp: String) async throws {
-        let url = directory.appendingPathComponent("\(stamp) - app.m4a")
+        let url = directory.appendingPathComponent("\(stamp)-app.m4a")
         let writer = try AudioFileWriter(url: url, channels: 2)
         appWriter = writer
         let capture = AppAudioCapture()
@@ -103,7 +103,7 @@ final class RecordingSession {
         micCapture = capture
         let hardwareFormat = try capture.bind()
         let channels = min(2, hardwareFormat.channelCount)
-        let url = directory.appendingPathComponent("\(stamp) - mic.m4a")
+        let url = directory.appendingPathComponent("\(stamp)-mic.m4a")
         let writer = try AudioFileWriter(url: url, channels: channels)
         micWriter = writer
         try capture.start(writer: writer) { [weak self] reason in

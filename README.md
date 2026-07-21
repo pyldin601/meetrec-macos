@@ -11,9 +11,11 @@ Each recording session writes separate AAC files into `~/MeetRecRecordings`, sha
 timestamp prefix:
 
 ```
-2026-07-21 14.30.05 - app.m4a   (48 kHz stereo, 160 kbps)
-2026-07-21 14.30.05 - mic.m4a   (48 kHz, mono 96 kbps or stereo 160 kbps, matching the device)
+20260721143005-app.m4a   (48 kHz stereo, 160 kbps)
+20260721143005-mic.m4a   (48 kHz, mono 96 kbps or stereo 160 kbps, matching the device)
 ```
+
+File names are CLI-friendly: digits-only `yyyyMMddHHmmss` timestamps, no spaces.
 
 Either source alone is enough to record — only the selected sources produce files.
 
