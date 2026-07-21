@@ -3,6 +3,10 @@ import CoreAudio
 import Foundation
 
 enum AudioProcessProvider {
+    /// kAudioHardwarePropertyProcessObjectList ('prs#') — present in the SDK
+    /// headers since macOS 14.2 but not exposed to Swift.
+    static let processObjectListSelector = AudioObjectPropertySelector(0x7072_7323)
+
     /// Applications currently registered with CoreAudio, i.e. processes that
     /// have set up audio input or output. Processes without a corresponding
     /// user-visible application (daemons, helpers) are skipped.
@@ -46,7 +50,7 @@ enum AudioProcessProvider {
 
     private static func processObjects() -> [AudioObjectID] {
         var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyProcessObjects,
+            mSelector: processObjectListSelector,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )

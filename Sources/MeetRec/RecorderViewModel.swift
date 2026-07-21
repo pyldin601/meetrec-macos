@@ -144,7 +144,7 @@ final class RecorderViewModel {
         }
 
         var processAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyProcessObjects,
+            mSelector: AudioProcessProvider.processObjectListSelector,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )

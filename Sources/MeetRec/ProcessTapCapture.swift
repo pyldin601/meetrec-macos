@@ -21,17 +21,17 @@ final class ProcessTapCapture {
         switch target {
         case .systemAudio:
             // Everything except MeetRec's own audio.
-            var exclude: [NSNumber] = []
+            var exclude: [AudioObjectID] = []
             let ownPID = ProcessInfo.processInfo.processIdentifier
             if let own = AudioProcessProvider.translatePIDToProcessObject(ownPID) {
-                exclude.append(NSNumber(value: own))
+                exclude.append(own)
             }
             description = CATapDescription(stereoGlobalTapButExcludeProcesses: exclude)
         case .app(let app):
             guard let object = AudioProcessProvider.translatePIDToProcessObject(app.pid) else {
                 throw MeetRecError("\(app.name) is not registered with CoreAudio — it may have quit. Refresh the list and try again.")
             }
-            description = CATapDescription(stereoMixdownOfProcesses: [NSNumber(value: object)])
+            description = CATapDescription(stereoMixdownOfProcesses: [object])
         }
         description.name = "MeetRec Tap"
         description.isPrivate = true
