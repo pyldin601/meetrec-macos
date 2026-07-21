@@ -64,8 +64,28 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // MARK: - Actions
 
     @objc private func toggleRecording() {
-        if model.isRecording { model.stopRecording() } else { model.startRecording() }
-        refresh()
+        if model.isRecording {
+            model.stopRecording()
+            refresh()
+        } else {
+            Task {
+                do {
+                    try await model.startRecording()
+                } catch {
+                    presentError(error.localizedDescription)
+                }
+                refresh()
+            }
+        }
+    }
+
+    private func presentError(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Recording Error"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     @objc private func selectSystemAudio() {
