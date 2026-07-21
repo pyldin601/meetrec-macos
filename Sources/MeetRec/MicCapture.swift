@@ -4,9 +4,14 @@ import AVFoundation
 /// native sample rate and channel count. Capture runs from init until
 /// `stop()`.
 final class MicCapture {
+    /// Called on the main queue when the engine stops on its own — the
+    /// captured device disconnected or changed shape. Never called after
+    /// `stop()`.
+    var onDied: (() -> Void)?
+
     private let engine = AVAudioEngine()
-    private let lock = NSLock()
-    private var file: AVAudioFile?
+    private let writer: AudioFileWriter
+    private var configObserver: NSObjectProtocol?
 
     init(url: URL) throws {
         let input = engine.inputNode
@@ -14,48 +19,44 @@ final class MicCapture {
         guard format.sampleRate > 0, format.channelCount > 0 else {
             throw MeetRecError("No usable microphone input device.")
         }
-        file = try AVAudioFile(
-            forWriting: url,
-            settings: [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: format.sampleRate,
-                AVNumberOfChannelsKey: format.channelCount,
-                AVEncoderBitRateKey: format.channelCount == 1 ? 96_000 : 160_000,
-            ],
-            commonFormat: .pcmFormatFloat32,
-            interleaved: false
-        )
+        writer = try AudioFileWriter(url: url, format: format)
         // Taps are delivered on a non-realtime thread, so writing the file
-        // here is safe. The lock covers the race with stop(): AVAudioEngine
-        // does not guarantee an in-flight tap block has drained when stop()
-        // returns.
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-            self?.write(buffer)
+        // here is safe.
+        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [writer] buffer, _ in
+            writer.write(buffer)
         }
         engine.prepare()
         do {
             try engine.start()
         } catch {
             input.removeTap(onBus: 0)
-            file = nil
-            try? FileManager.default.removeItem(at: url)
+            writer.finalize()
             throw MeetRecError("Could not start the microphone: \(error.localizedDescription)")
+        }
+        // The engine posts a configuration change when its input device
+        // disappears or changes shape; it stops rendering when the device is
+        // actually gone. A spurious change can also fire while the engine
+        // keeps running — ignore those.
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, !self.engine.isRunning else { return }
+            self.onDied?()
         }
     }
 
-    private func write(_ buffer: AVAudioPCMBuffer) {
-        lock.lock()
-        defer { lock.unlock() }
-        try? file?.write(from: buffer)
-    }
-
-    /// Stops capture and finalizes the file (the M4A header is written when
-    /// the AVAudioFile is released).
+    /// Stops capture and finalizes the file; a file that captured nothing
+    /// is deleted.
     func stop() {
+        if let configObserver {
+            NotificationCenter.default.removeObserver(configObserver)
+            self.configObserver = nil
+        }
+        onDied = nil
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        lock.lock()
-        file = nil
-        lock.unlock()
+        writer.finalize()
     }
 }

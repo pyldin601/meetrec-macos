@@ -16,6 +16,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.delegate = self
         menu.autoenablesItems = false
         statusItem.menu = menu
+        model.onExternalChange = { [weak self] in self?.refresh() }
+        model.onError = { [weak self] in self?.presentError($0) }
         refresh()
     }
 
@@ -110,9 +112,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     // MARK: - Status item button
 
-    /// Single UI sync point. State only changes through the menu for now, so
-    /// calling this after each action suffices; model observation arrives
-    /// when state starts changing from outside (device loss, failures).
+    /// Single UI sync point: called after every menu action, and by the
+    /// model's onExternalChange hook when state changes without one (mic
+    /// loss stopping the session).
     private func refresh() {
         updateButton()
         elapsedTimer?.invalidate()
