@@ -4,7 +4,9 @@ import PackageDescription
 let package = Package(
     name: "MeetRec",
     platforms: [
-        .macOS(.v14)
+        // CoreAudio process taps (CATapDescription) need 14.2; 14.4 avoids
+        // early tap bugs and matches Apple's AudioCap sample baseline.
+        .macOS("14.4")
     ],
     targets: [
         .executableTarget(

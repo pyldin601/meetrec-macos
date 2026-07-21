@@ -29,6 +29,10 @@ enum MicrophoneDeviceProvider {
         return deviceID
     }
 
+    static func deviceUID(_ deviceID: AudioDeviceID) -> String? {
+        stringProperty(of: deviceID, selector: kAudioDevicePropertyDeviceUID)
+    }
+
     static func isAlive(_ deviceID: AudioDeviceID) -> Bool {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyDeviceIsAlive,

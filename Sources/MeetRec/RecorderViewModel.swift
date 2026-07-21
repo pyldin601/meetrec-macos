@@ -1,34 +1,25 @@
 import AppKit
 import AVFoundation
 import CoreAudio
-import CoreGraphics
 import Foundation
 import Observation
-import ScreenCaptureKit
 
 @MainActor
 @Observable
 final class RecorderViewModel {
-    var sourceMode: SourceMode = .application
-    var selectedAppPID: pid_t?
-    var selectedWindowID: CGWindowID?
+    var selectedTarget: CaptureTarget?
     var selectedMicID: AudioDeviceID?
     var lastError: String?
 
-    private(set) var apps: [SCRunningApplication] = []
-    private(set) var windows: [SCWindow] = []
+    private(set) var audioApps: [AudioApp] = []
     private(set) var mics: [MicDevice] = []
     private(set) var state: RecordingState = .idle
-    private(set) var screenAccessGranted = true
     private(set) var micAccessDenied = false
-    private(set) var isRefreshingContent = false
 
-    private var display: SCDisplay?
     private var session: RecordingSession?
     private var activity: NSObjectProtocol?
-    private var deviceListListenerInstalled = false
+    private var listenersInstalled = false
     private var didPreselectMic = false
-    private var didRequestScreenAccess = false
 
     var isRecording: Bool {
         if case .recording = state { return true }
@@ -38,15 +29,6 @@ final class RecorderViewModel {
     var recordingStartDate: Date? {
         if case .recording(let startedAt) = state { return startedAt }
         return nil
-    }
-
-    var selectedTarget: CaptureTarget? {
-        switch sourceMode {
-        case .application:
-            return apps.first { $0.processID == selectedAppPID }.map(CaptureTarget.app)
-        case .window:
-            return windows.first { $0.windowID == selectedWindowID }.map(CaptureTarget.window)
-        }
     }
 
     var selectedMic: MicDevice? {
@@ -60,35 +42,14 @@ final class RecorderViewModel {
     func bootstrap() {
         micAccessDenied = Permissions.microphoneDenied
         refreshMics()
-        installDeviceListListener()
-        Task { await refreshShareableContent() }
+        refreshAudioApps()
+        installListeners()
     }
 
-    func refreshShareableContent() async {
-        guard !isRefreshingContent else { return }
-        isRefreshingContent = true
-        defer { isRefreshingContent = false }
-        do {
-            let content = try await ShareableContentProvider.fetch()
-            apps = content.apps
-            windows = content.windows
-            display = content.display
-            screenAccessGranted = true
-            if let pid = selectedAppPID, !apps.contains(where: { $0.processID == pid }) {
-                selectedAppPID = nil
-            }
-            if let windowID = selectedWindowID, !windows.contains(where: { $0.windowID == windowID }) {
-                selectedWindowID = nil
-            }
-        } catch {
-            apps = []
-            windows = []
-            display = nil
-            screenAccessGranted = Permissions.screenCaptureGranted
-            if !screenAccessGranted, !didRequestScreenAccess {
-                didRequestScreenAccess = true
-                Permissions.requestScreenCaptureAccess()
-            }
+    func refreshAudioApps() {
+        audioApps = AudioProcessProvider.audioApps()
+        if state == .idle, case .some(.app(let app)) = selectedTarget, !audioApps.contains(app) {
+            selectedTarget = nil
         }
     }
 
@@ -120,20 +81,13 @@ final class RecorderViewModel {
                 return
             }
         }
-        if selectedTarget != nil, !Permissions.screenCaptureGranted {
-            Permissions.requestScreenCaptureAccess()
-            screenAccessGranted = false
-            state = .idle
-            lastError = "Screen Recording permission is required to capture app audio. Enable MeetRec in System Settings, then relaunch the app."
-            return
-        }
 
-        let session = RecordingSession(target: selectedTarget, display: display, mic: selectedMic)
+        let session = RecordingSession(target: selectedTarget, mic: selectedMic)
         session.onSourceDied = { [weak self] reason in
             Task { @MainActor in await self?.stopRecording(reason: reason) }
         }
         do {
-            try await session.start()
+            try session.start()
         } catch {
             state = .idle
             lastError = error.localizedDescription
@@ -150,7 +104,7 @@ final class RecorderViewModel {
     func stopRecording(reason: String? = nil) async {
         guard case .recording = state, let session else { return }
         state = .stopping
-        await session.stop()
+        session.stop()
         self.session = nil
         if let activity {
             ProcessInfo.processInfo.endActivity(activity)
@@ -158,10 +112,10 @@ final class RecorderViewModel {
         }
         state = .idle
         lastError = reason
-        // Source lists may have changed while recording (apps quit, windows
-        // closed, devices unplugged).
+        // Source lists may have changed while recording (apps quit, devices
+        // unplugged).
         refreshMics()
-        Task { await refreshShareableContent() }
+        refreshAudioApps()
     }
 
     /// Called from the app-quit path; safe to call in any state. Returns once
@@ -175,20 +129,27 @@ final class RecorderViewModel {
         }
     }
 
-    private func installDeviceListListener() {
-        guard !deviceListListenerInstalled else { return }
-        deviceListListenerInstalled = true
-        var address = AudioObjectPropertyAddress(
+    private func installListeners() {
+        guard !listenersInstalled else { return }
+        listenersInstalled = true
+        let systemObject = AudioObjectID(kAudioObjectSystemObject)
+
+        var deviceAddress = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain
         )
-        AudioObjectAddPropertyListenerBlock(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address,
-            .main
-        ) { [weak self] _, _ in
+        AudioObjectAddPropertyListenerBlock(systemObject, &deviceAddress, .main) { [weak self] _, _ in
             Task { @MainActor in self?.refreshMics() }
+        }
+
+        var processAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjects,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        AudioObjectAddPropertyListenerBlock(systemObject, &processAddress, .main) { [weak self] _, _ in
+            Task { @MainActor in self?.refreshAudioApps() }
         }
     }
 }

@@ -19,7 +19,9 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>14.0</string>
+	<string>14.4</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>MeetRec records the audio of the selected application (or the system mix) to capture your meeting.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>

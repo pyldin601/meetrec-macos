@@ -1,6 +1,5 @@
 import AppKit
 import CoreAudio
-import ScreenCaptureKit
 import SwiftUI
 
 struct ContentView: View {
@@ -49,52 +48,32 @@ struct ContentView: View {
                     .font(.headline)
                 Spacer()
                 Button {
-                    Task { await model.refreshShareableContent() }
+                    model.refreshAudioApps()
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
                 .buttonStyle(.borderless)
-                .disabled(model.isRefreshingContent || model.state != .idle)
-                .help("Refresh the list of apps and windows")
+                .disabled(model.state != .idle)
+                .help("Refresh the list of audio-capable apps")
             }
 
-            Picker("Capture", selection: $model.sourceMode) {
-                ForEach(SourceMode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
+            Picker("Source", selection: $model.selectedTarget) {
+                Text("None").tag(nil as CaptureTarget?)
+                Text("System audio (all apps)").tag(CaptureTarget.systemAudio as CaptureTarget?)
+                if !model.audioApps.isEmpty {
+                    Divider()
+                    ForEach(model.audioApps) { app in
+                        Text(app.name).tag(CaptureTarget.app(app) as CaptureTarget?)
+                    }
                 }
             }
-            .pickerStyle(.segmented)
             .labelsHidden()
             .disabled(model.state != .idle)
 
-            switch model.sourceMode {
-            case .application:
-                Picker("Application", selection: $model.selectedAppPID) {
-                    Text("None").tag(nil as pid_t?)
-                    ForEach(model.apps, id: \.processID) { app in
-                        Text(app.applicationName).tag(app.processID as pid_t?)
-                    }
-                }
-                .labelsHidden()
-                .disabled(model.state != .idle)
-            case .window:
-                Picker("Window", selection: $model.selectedWindowID) {
-                    Text("None").tag(nil as CGWindowID?)
-                    ForEach(model.windows, id: \.windowID) { window in
-                        Text(windowLabel(window)).tag(window.windowID as CGWindowID?)
-                    }
-                }
-                .labelsHidden()
-                .disabled(model.state != .idle)
-            }
-
-            if !model.screenAccessGranted {
-                PermissionBanner(
-                    text: "Screen Recording permission is required to list and capture apps. Enable MeetRec in System Settings, then quit and relaunch the app.",
-                    buttonTitle: "Open System Settings",
-                    action: Permissions.openScreenRecordingSettings
-                )
-            }
+            Text("Apps show up here once they have used audio. Pick System audio to capture everything except MeetRec itself.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .modifier(GlassCard())
     }
@@ -128,9 +107,21 @@ struct ContentView: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.yellow)
-            Text(message)
-                .font(.callout)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(message)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                if message.contains("System Settings") {
+                    Button("Open System Settings") {
+                        if message.contains("Microphone") {
+                            Permissions.openMicrophoneSettings()
+                        } else {
+                            Permissions.openSystemAudioRecordingSettings()
+                        }
+                    }
+                    .controlSize(.small)
+                }
+            }
             Spacer(minLength: 0)
             Button {
                 model.lastError = nil
@@ -206,12 +197,6 @@ struct ContentView: View {
                 .opacity(model.canRecord ? 1 : 0.5)
             }
         }
-    }
-
-    private func windowLabel(_ window: SCWindow) -> String {
-        let appName = window.owningApplication?.applicationName ?? "Unknown"
-        let title = window.title ?? ""
-        return title.isEmpty ? appName : "\(appName) — \(title)"
     }
 }
 

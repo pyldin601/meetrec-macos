@@ -1,35 +1,42 @@
 import CoreAudio
 import Foundation
-import ScreenCaptureKit
 
-enum SourceMode: String, CaseIterable, Identifiable {
-    case application = "Application"
-    case window = "Window"
+struct AudioApp: Hashable, Identifiable {
+    let pid: pid_t
+    let name: String
+    let bundleID: String?
 
-    var id: String { rawValue }
+    var id: pid_t { pid }
 }
 
-enum CaptureTarget {
-    case app(SCRunningApplication)
-    case window(SCWindow)
-
-    var processID: pid_t? {
-        switch self {
-        case .app(let app):
-            return app.processID
-        case .window(let window):
-            return window.owningApplication?.processID
-        }
-    }
+enum CaptureTarget: Hashable {
+    case systemAudio
+    case app(AudioApp)
 
     var displayName: String {
         switch self {
+        case .systemAudio:
+            return "System audio"
         case .app(let app):
-            return app.applicationName
-        case .window(let window):
-            let appName = window.owningApplication?.applicationName ?? "Unknown"
-            let title = window.title ?? ""
-            return title.isEmpty ? appName : "\(appName) — \(title)"
+            return app.name
+        }
+    }
+
+    var pid: pid_t? {
+        switch self {
+        case .systemAudio:
+            return nil
+        case .app(let app):
+            return app.pid
+        }
+    }
+
+    var fileSuffix: String {
+        switch self {
+        case .systemAudio:
+            return "system"
+        case .app:
+            return "app"
         }
     }
 }

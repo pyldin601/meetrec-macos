@@ -1,6 +1,5 @@
 import AppKit
 import AVFoundation
-import CoreGraphics
 import Foundation
 
 enum Permissions {
@@ -13,19 +12,11 @@ enum Permissions {
         await AVCaptureDevice.requestAccess(for: .audio)
     }
 
-    static var screenCaptureGranted: Bool {
-        CGPreflightScreenCaptureAccess()
-    }
-
-    /// Registers the app in the Screen Recording privacy list and shows the
-    /// system prompt the first time it is ever called for this app. Granting
-    /// the permission only takes effect after the app is relaunched.
-    @discardableResult
-    static func requestScreenCaptureAccess() -> Bool {
-        CGRequestScreenCaptureAccess()
-    }
-
-    static func openScreenRecordingSettings() {
+    /// System-audio capture (CoreAudio process taps) has no public preflight
+    /// API; the permission prompt appears automatically when the first tap is
+    /// created, and a denial surfaces as a tap-creation error. This deep links
+    /// to the pane where the user can flip the switch afterwards.
+    static func openSystemAudioRecordingSettings() {
         open("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
     }
 

@@ -1,7 +1,6 @@
 import AppKit
 import AVFoundation
 import Foundation
-import ScreenCaptureKit
 
 /// Coordinates one recording: up to two capture pipelines, their writers, and
 /// the watchers that detect a source dying mid-recording. Any source death
@@ -15,23 +14,21 @@ final class RecordingSession {
     var onSourceDied: ((String) -> Void)?
 
     private let target: CaptureTarget?
-    private let display: SCDisplay?
     private let mic: MicDevice?
 
-    private var appCapture: AppAudioCapture?
+    private var appCapture: ProcessTapCapture?
     private var appWriter: AudioFileWriter?
     private var micCapture: MicCapture?
     private var micWriter: AudioFileWriter?
     private var appTerminationObserver: NSObjectProtocol?
     private var stopped = false
 
-    init(target: CaptureTarget?, display: SCDisplay?, mic: MicDevice?) {
+    init(target: CaptureTarget?, mic: MicDevice?) {
         self.target = target
-        self.display = display
         self.mic = mic
     }
 
-    func start() async throws {
+    func start() throws {
         let directory = Self.recordingsDirectory
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -46,23 +43,23 @@ final class RecordingSession {
 
         do {
             if let target {
-                try await startAppCapture(target: target, into: directory, stamp: stamp)
+                try startAppCapture(target: target, into: directory, stamp: stamp)
             }
             if let mic {
                 try startMicCapture(device: mic, into: directory, stamp: stamp)
             }
         } catch {
-            await rollback()
+            rollback()
             throw error
         }
     }
 
-    func stop() async {
+    func stop() {
         guard !stopped else { return }
         stopped = true
         removeAppTerminationObserver()
         if let appCapture {
-            await appCapture.stop()
+            appCapture.stop()
             appWriter?.finalize()
         }
         if let micCapture {
@@ -71,20 +68,17 @@ final class RecordingSession {
         }
     }
 
-    private func startAppCapture(target: CaptureTarget, into directory: URL, stamp: String) async throws {
-        let url = directory.appendingPathComponent("\(stamp)-app.m4a")
+    private func startAppCapture(target: CaptureTarget, into directory: URL, stamp: String) throws {
+        let url = directory.appendingPathComponent("\(stamp)-\(target.fileSuffix).m4a")
         let writer = try AudioFileWriter(url: url, channels: 2)
         appWriter = writer
-        let capture = AppAudioCapture()
+        let capture = ProcessTapCapture()
         appCapture = capture
-        try await capture.start(target: target, display: display, writer: writer) { [weak self] reason in
-            Task { @MainActor in self?.sourceDied(reason) }
-        }
+        try capture.start(target: target, writer: writer)
 
-        // A display-based application filter keeps streaming silence after the
-        // captured app quits (didStopWithError never fires), so watch process
-        // termination explicitly. Harmless duplicate signal in window mode.
-        if let pid = target.processID {
+        // The tap keeps producing silence after the captured app quits, so
+        // watch process termination explicitly. Not needed for system audio.
+        if let pid = target.pid {
             appTerminationObserver = NSWorkspace.shared.notificationCenter.addObserver(
                 forName: NSWorkspace.didTerminateApplicationNotification,
                 object: nil,
@@ -116,12 +110,10 @@ final class RecordingSession {
         onSourceDied?(reason)
     }
 
-    private func rollback() async {
+    private func rollback() {
         stopped = true
         removeAppTerminationObserver()
-        if let appCapture {
-            await appCapture.stop()
-        }
+        appCapture?.stop()
         micCapture?.stop()
         appWriter?.discardIfEmpty()
         micWriter?.discardIfEmpty()
