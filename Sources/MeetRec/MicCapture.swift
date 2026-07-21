@@ -63,17 +63,22 @@ final class MicCapture {
         }
 
         // The engine posts a configuration change when its pinned input device
-        // disappears or changes shape mid-recording; either way the session is
-        // stopped so the partial file stays valid.
+        // disappears or changes shape mid-recording. It also posts a spurious
+        // one right after start (notably when pinned to a non-default device),
+        // so only treat it as a source death when the device is actually gone
+        // or the engine stopped rendering.
+        let deviceID = deviceID
         configChangeObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
             object: engine,
             queue: .main
-        ) { _ in
-            onFailure("The microphone was disconnected or its configuration changed.")
+        ) { [weak engine] _ in
+            let engineRunning = engine?.isRunning ?? false
+            if !engineRunning || !MicrophoneDeviceProvider.isAlive(deviceID) {
+                onFailure("The microphone was disconnected or its configuration changed.")
+            }
         }
 
-        let deviceID = deviceID
         let listener: AudioObjectPropertyListenerBlock = { _, _ in
             if !MicrophoneDeviceProvider.isAlive(deviceID) {
                 onFailure("The microphone was disconnected.")
