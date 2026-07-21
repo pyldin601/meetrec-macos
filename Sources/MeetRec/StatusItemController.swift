@@ -67,8 +67,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     @objc private func toggleRecording() {
         if model.isRecording {
-            model.stopRecording()
-            refresh()
+            Task {
+                await model.stopRecording()
+                refresh()
+            }
         } else {
             Task {
                 do {

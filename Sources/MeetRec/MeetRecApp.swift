@@ -24,9 +24,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // Stopping is synchronous while sessions are only state; this grows
-        // an async finalize step once real captures write files.
-        model.stopRecording()
-        return .terminateNow
+        guard model.isRecording else { return .terminateNow }
+        // Finalize the recording files before allowing termination.
+        Task {
+            await model.stopRecording()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 }

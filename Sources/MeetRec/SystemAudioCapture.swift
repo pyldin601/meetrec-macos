@@ -3,39 +3,52 @@ import AVFoundation
 import CoreAudio
 
 /// Captures the whole system output mix (excluding MeetRec's own audio)
-/// with a CoreAudio process tap (macOS 14.2+) into an AAC .m4a file.
-/// Capture runs from init until `stop()`.
+/// with a CoreAudio process tap (macOS 14.2+) and produces it as an async
+/// stream of PCM buffers. Capture runs from init until `stop()` or until
+/// the consuming task is cancelled.
+///
+/// The stream is gapless: what a tap delivers during system-wide silence is
+/// not reliably specified, so undelivered stretches beyond a threshold are
+/// filled with silence buffers, keeping consumed audio wall-clock
+/// continuous. Every element is a self-owned deep copy — CoreAudio's IO
+/// buffer is only valid inside the callback, so buffers must be copied to
+/// outlive it. (AVAudioPCMBuffer is not Sendable; this is safe because
+/// ownership transfers at yield — the producer never touches a copy again.)
+///
+/// The stream is unicast: exactly one consumer may iterate `buffers`.
 ///
 /// Needs only the "System Audio Recording Only" permission — never Screen
 /// Recording. The permission prompt appears when the first tap is created;
 /// a denial surfaces as a creation error.
-final class ProcessTapCapture {
+final class SystemAudioCapture {
+    let format: AVAudioFormat
+    let buffers: AsyncStream<AVAudioPCMBuffer>
+
+    private let continuation: AsyncStream<AVAudioPCMBuffer>.Continuation
     private let ioQueue = DispatchQueue(label: "dev.roman.MeetRec.system-tap")
-    private let writer: AudioFileWriter
-    private let format: AVAudioFormat
-    private let silenceBuffer: AVAudioPCMBuffer?
+    private let stateLock = NSLock()
     private var tapID = AudioObjectID(kAudioObjectUnknown)
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var ioProcID: AudioDeviceIOProcID?
     private var running = false
+    private var tornDown = false
 
-    // Timeline reconstruction. What the tap delivers during system-wide
-    // silence is not reliably specified — it may tick with zeroed buffers,
-    // or deliver nothing until some process renders audio. The file must be
-    // wall-clock continuous regardless (it has to stay aligned with the mic
-    // track), so the timeline is anchored to the host clock and undelivered
-    // stretches are padded with silence. Gaps are measured between
-    // successive deliveries — never against the session start, which would
-    // let host-vs-device clock drift accumulate into a false gap.
-    // Touched only on ioQueue (stop() drains the queue before its trailing
-    // pad).
+    // Delivery tracking for gap padding, touched only on ioQueue (stop()
+    // drains the queue before its trailing pad). Gaps are measured between
+    // successive deliveries — never against an absolute session anchor,
+    // which would let host-vs-device clock drift accumulate over hours into
+    // a false gap.
     private var lastDeliveryHostTime: UInt64 = 0
     private var lastDeliveredFrames: Int64 = 0
     /// Gaps shorter than this are ignored: callback jitter and device
     /// spin-up must never perforate continuous audio with micro-padding.
     private let paddingThresholdSeconds = 0.5
 
-    init(url: URL) throws {
+    /// A stalled consumer queues at most this many buffers (roughly 40 s of
+    /// audio at typical ~512-frame IO cycles) before the oldest are dropped.
+    private static let maxQueuedBuffers = 4096
+
+    init() throws {
         // Everything except MeetRec's own audio (alert sounds).
         var exclude: [AudioObjectID] = []
         if let own = Self.processObject(forPID: ProcessInfo.processInfo.processIdentifier) {
@@ -67,14 +80,6 @@ final class ProcessTapCapture {
             throw MeetRecError("Could not read the system audio tap's format (error \(formatStatus)).")
         }
 
-        let writer: AudioFileWriter
-        do {
-            writer = try AudioFileWriter(url: url, format: tapFormat)
-        } catch {
-            AudioHardwareDestroyProcessTap(tap)
-            throw error
-        }
-
         // Aggregate device hosting the tap; the default output device
         // provides the clock so tap timing matches what the user hears.
         var aggregateDescription: [String: Any] = [
@@ -102,27 +107,36 @@ final class ProcessTapCapture {
             &aggregate
         )
         guard aggregateStatus == noErr, aggregate != kAudioObjectUnknown else {
-            writer.finalize()
             AudioHardwareDestroyProcessTap(tap)
             throw MeetRecError("Could not create the capture device (error \(aggregateStatus)).")
         }
 
-        self.writer = writer
+        let (stream, continuation) = AsyncStream.makeStream(
+            of: AVAudioPCMBuffer.self,
+            bufferingPolicy: .bufferingNewest(Self.maxQueuedBuffers)
+        )
+        self.buffers = stream
+        self.continuation = continuation
         self.format = tapFormat
-        self.silenceBuffer = Self.makeSilenceBuffer(format: tapFormat)
         self.tapID = tap
         self.aggregateID = aggregate
 
+        // If the consumer's task is cancelled (or the stream is dropped),
+        // release the hardware; tearDownHardware is idempotent, so the
+        // finish() inside stop() arriving here too is harmless.
+        continuation.onTermination = { [weak self] _ in
+            self?.tearDownHardware()
+        }
+
         // CoreAudio invokes the block on ioQueue (not the realtime HAL
-        // thread), so encoding in the writer here is safe.
+        // thread), so copying and yielding here is safe.
         var newProcID: AudioDeviceIOProcID?
         let procStatus = AudioDeviceCreateIOProcIDWithBlock(&newProcID, aggregate, ioQueue) {
             [weak self] inNow, inInputData, inInputTime, _, _ in
             self?.handleIO(now: inNow, data: inInputData, time: inInputTime)
         }
         guard procStatus == noErr, let procID = newProcID else {
-            cleanUp()
-            writer.finalize()
+            tearDownHardware()
             throw MeetRecError("Could not attach to the capture device (error \(procStatus)).")
         }
         ioProcID = procID
@@ -130,18 +144,33 @@ final class ProcessTapCapture {
         lastDeliveryHostTime = mach_absolute_time()
         let startStatus = AudioDeviceStart(aggregate, procID)
         guard startStatus == noErr else {
-            AudioDeviceDestroyIOProcID(aggregate, procID)
-            ioProcID = nil
-            cleanUp()
-            writer.finalize()
+            tearDownHardware()
             throw MeetRecError("Could not start system audio capture (error \(startStatus)).")
         }
         running = true
     }
 
-    /// Stops capture, pads the trailing silence, and finalizes the file; a
-    /// file that captured nothing is deleted.
+    /// Stops capture, pads the trailing silence, and finishes the stream —
+    /// the consumer's for-await loop ends after draining what was captured.
     func stop() {
+        tearDownHardware()
+        // Drain in-flight IO callbacks, then pad up to the stop instant so
+        // consumed audio spans the whole capture even if the tap went
+        // quiet. The threshold keeps an immediate start-failure rollback
+        // from padding audio that never existed.
+        ioQueue.sync {}
+        ioQueue.sync {
+            padDeliveryGap(upTo: mach_absolute_time())
+            lastDeliveryHostTime = 0
+        }
+        continuation.finish()
+    }
+
+    private func tearDownHardware() {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard !tornDown else { return }
+        tornDown = true
         if running, let ioProcID {
             AudioDeviceStop(aggregateID, ioProcID)
             running = false
@@ -150,17 +179,14 @@ final class ProcessTapCapture {
             AudioDeviceDestroyIOProcID(aggregateID, ioProcID)
             self.ioProcID = nil
         }
-        cleanUp()
-        // Drain in-flight IO callbacks, then pad up to the stop instant so
-        // the file spans the whole session even if the tap went quiet. The
-        // threshold keeps a start-failure rollback (which runs within
-        // milliseconds) from padding a file that should be discarded.
-        ioQueue.sync {}
-        if lastDeliveryHostTime != 0 {
-            ioQueue.sync { padDeliveryGap(upTo: mach_absolute_time()) }
-            lastDeliveryHostTime = 0
+        if aggregateID != kAudioObjectUnknown {
+            AudioHardwareDestroyAggregateDevice(aggregateID)
+            aggregateID = kAudioObjectUnknown
         }
-        writer.finalize()
+        if tapID != kAudioObjectUnknown {
+            AudioHardwareDestroyProcessTap(tapID)
+            tapID = kAudioObjectUnknown
+        }
     }
 
     // MARK: - IO (ioQueue only)
@@ -171,32 +197,37 @@ final class ProcessTapCapture {
         time: UnsafePointer<AudioTimeStamp>
     ) {
         let listPointer = UnsafeMutablePointer(mutating: data)
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: listPointer, deallocator: nil),
-              buffer.frameLength > 0
+        guard let delivered = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: listPointer, deallocator: nil),
+              delivered.frameLength > 0
         else { return }
         let stamp = time.pointee
         let hostTime = (stamp.mFlags.contains(.hostTimeValid) && stamp.mHostTime != 0)
             ? stamp.mHostTime
             : now.pointee.mHostTime
         padDeliveryGap(upTo: hostTime)
-        writer.write(buffer)
+        if let copy = Self.deepCopy(delivered) {
+            continuation.yield(copy)
+        }
         lastDeliveryHostTime = hostTime
-        lastDeliveredFrames = Int64(buffer.frameLength)
+        lastDeliveredFrames = Int64(delivered.frameLength)
     }
 
-    /// Writes silence for the stretch since the last delivery that the tap
-    /// did not cover, so the file stays wall-clock continuous.
+    /// Yields silence for the stretch since the last delivery that the tap
+    /// did not cover. Each chunk is freshly allocated — a shared silence
+    /// buffer must not be yielded, since queued elements would alias it.
     private func padDeliveryGap(upTo hostTime: UInt64) {
-        guard let silenceBuffer, lastDeliveryHostTime != 0 else { return }
+        guard lastDeliveryHostTime != 0 else { return }
         let elapsed = Self.hostDeltaSeconds(from: lastDeliveryHostTime, to: hostTime)
         // The previous delivery's frames cover the start of the interval.
         var gap = Int64(elapsed * format.sampleRate) - lastDeliveredFrames
         guard gap > Int64(paddingThresholdSeconds * format.sampleRate) else { return }
+        let chunkFrames = Int64(format.sampleRate) // 1 s per chunk
         while gap > 0 {
-            let chunk = AVAudioFrameCount(min(gap, Int64(silenceBuffer.frameCapacity)))
-            silenceBuffer.frameLength = chunk
-            writer.write(silenceBuffer)
-            gap -= Int64(chunk)
+            let frames = AVAudioFrameCount(min(gap, chunkFrames))
+            if let chunk = Self.makeSilenceBuffer(format: format, frames: frames) {
+                continuation.yield(chunk)
+            }
+            gap -= Int64(frames)
         }
     }
 
@@ -213,9 +244,22 @@ final class ProcessTapCapture {
         return Double(end - start) * Double(timebase.numer) / Double(timebase.denom) / 1_000_000_000
     }
 
-    private static func makeSilenceBuffer(format: AVAudioFormat) -> AVAudioPCMBuffer? {
-        // One second of zeroed frames, reused for every pad chunk.
-        let frames = AVAudioFrameCount(format.sampleRate)
+    private static func deepCopy(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let copy = AVAudioPCMBuffer(pcmFormat: buffer.format, frameCapacity: buffer.frameLength) else {
+            return nil
+        }
+        copy.frameLength = buffer.frameLength
+        let source = UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList)
+        let destination = UnsafeMutableAudioBufferListPointer(copy.mutableAudioBufferList)
+        for (sourceBuffer, destinationBuffer) in zip(source, destination) {
+            if let sourceData = sourceBuffer.mData, let destinationData = destinationBuffer.mData {
+                memcpy(destinationData, sourceData, Int(min(sourceBuffer.mDataByteSize, destinationBuffer.mDataByteSize)))
+            }
+        }
+        return copy
+    }
+
+    private static func makeSilenceBuffer(format: AVAudioFormat, frames: AVAudioFrameCount) -> AVAudioPCMBuffer? {
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { return nil }
         buffer.frameLength = frames
         for audioBuffer in UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList) {
@@ -224,17 +268,6 @@ final class ProcessTapCapture {
             }
         }
         return buffer
-    }
-
-    private func cleanUp() {
-        if aggregateID != kAudioObjectUnknown {
-            AudioHardwareDestroyAggregateDevice(aggregateID)
-            aggregateID = kAudioObjectUnknown
-        }
-        if tapID != kAudioObjectUnknown {
-            AudioHardwareDestroyProcessTap(tapID)
-            tapID = kAudioObjectUnknown
-        }
     }
 
     private static func processObject(forPID pid: pid_t) -> AudioObjectID? {

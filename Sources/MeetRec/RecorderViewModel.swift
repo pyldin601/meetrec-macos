@@ -20,7 +20,10 @@ final class RecorderViewModel {
     var onError: ((String) -> Void)?
 
     private var micCapture: MicCapture?
-    private var systemCapture: ProcessTapCapture?
+    private var systemCapture: SystemAudioCapture?
+    /// Drains the system capture's buffer stream into its file; finishes
+    /// (finalizing the file) once the stream ends.
+    private var systemWriterTask: Task<Void, Never>?
     private var session: (stamp: String, folder: URL)?
     /// Rejects re-entry while the permission request is awaited.
     private var isStarting = false
@@ -52,7 +55,26 @@ final class RecorderViewModel {
 
         if systemAudioEnabled {
             do {
-                systemCapture = try ProcessTapCapture(url: folder.appendingPathComponent("\(stamp)-system.m4a"))
+                let capture = try SystemAudioCapture()
+                let writer: AudioFileWriter
+                do {
+                    writer = try AudioFileWriter(
+                        url: folder.appendingPathComponent("\(stamp)-system.m4a"),
+                        format: capture.format
+                    )
+                } catch {
+                    capture.stop()
+                    throw error
+                }
+                systemCapture = capture
+                // Detached: encoding must not run on (or block behind) the
+                // main actor.
+                systemWriterTask = Task.detached(priority: .userInitiated) {
+                    for await buffer in capture.buffers {
+                        writer.write(buffer)
+                    }
+                    writer.finalize()
+                }
             } catch {
                 removeIfEmpty(folder)
                 throw error
@@ -62,8 +84,7 @@ final class RecorderViewModel {
             do {
                 micCapture = try makeMicCapture(url: folder.appendingPathComponent("\(stamp)-mic.m4a"))
             } catch {
-                systemCapture?.stop()
-                systemCapture = nil
+                await stopSystemCapture()
                 removeIfEmpty(folder)
                 throw error
             }
@@ -73,13 +94,22 @@ final class RecorderViewModel {
         recordingStartDate = startedAt
     }
 
-    func stopRecording() {
+    /// Returns once every capture is stopped and all files are finalized.
+    func stopRecording() async {
         micCapture?.stop()
         micCapture = nil
-        systemCapture?.stop()
-        systemCapture = nil
+        await stopSystemCapture()
         session = nil
         recordingStartDate = nil
+    }
+
+    private func stopSystemCapture() async {
+        systemCapture?.stop()
+        systemCapture = nil
+        // The writer task drains the remaining buffers, then finalizes the
+        // file; quitting must not outrun it.
+        await systemWriterTask?.value
+        systemWriterTask = nil
     }
 
     // MARK: - Mic failover
@@ -115,9 +145,11 @@ final class RecorderViewModel {
             if systemAudioEnabled {
                 onError?("The microphone was lost and no input could take over. Recording continues without it.")
             } else {
-                stopRecording()
-                onExternalChange?()
-                onError?("The microphone was lost and no input could take over. The recording was stopped.")
+                Task {
+                    await stopRecording()
+                    onExternalChange?()
+                    onError?("The microphone was lost and no input could take over. The recording was stopped.")
+                }
             }
         }
     }
