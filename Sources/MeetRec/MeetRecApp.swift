@@ -52,8 +52,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 switch event {
                 case .opened(let format):
                     fputs("[capture] opened: \(format)\n", stderr)
-                case .bytes(let chunk):
-                    fputs("[bytes] \(chunk.count)\n", stderr)
+                case .bytes(let chunk, let pts):
+                    fputs("[bytes] \(chunk.count) @ \(pts)\n", stderr)
                 case .closed(let error):
                     fputs("[capture] closed: \(error?.localizedDescription ?? "nil")\n", stderr)
                 }
