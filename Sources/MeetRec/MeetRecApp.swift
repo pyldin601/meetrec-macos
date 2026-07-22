@@ -54,11 +54,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             for await event in audioDeviceEventStream {
                 switch event {
                 case .opened(let openedFormat):
-                    // Finalize any previous writer before replacing it — a
-                    // device switch mid-recording fires .opened again, and
-                    // reusing the old file's name would silently overwrite
-                    // its audio.
-                    writer?.finalize()
                     format = openedFormat
                     let url = recordingsDirectory().appendingPathComponent("\(stamp(for: Date()))-mic.m4a")
                     writer = try? AudioFileWriter(url: url, format: openedFormat)
@@ -66,7 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     if let format {
                         writer?.write(chunk, format: format)
                     }
-                case .closed:
+                case .closed(let error):
                     writer?.finalize()
                     writer = nil
                     format = nil

@@ -38,9 +38,19 @@ final class AudioFileWriter {
     /// released). A file that captured nothing is deleted.
     func finalize() {
         file = nil
-        if !wroteFrames {
-            try? FileManager.default.removeItem(at: url)
-        }
+        deleteIfEmpty()
+    }
+
+    /// Same cleanup as `finalize()`, so a writer that's just dropped (e.g.
+    /// replaced by a new one on a device switch) without an explicit
+    /// finalize() call still doesn't leave an empty file behind.
+    deinit {
+        deleteIfEmpty()
+    }
+
+    private func deleteIfEmpty() {
+        guard !wroteFrames else { return }
+        try? FileManager.default.removeItem(at: url)
     }
 }
 
