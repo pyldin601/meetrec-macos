@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import CoreAudio
 
 @main
@@ -48,16 +49,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
+            var writer: AudioFileWriter?
+            var format: AVAudioFormat?
             for await event in audioDeviceEventStream {
                 switch event {
-                case .opened(let format):
-                    fputs("[capture] opened: \(format)\n", stderr)
-                case .bytes(let chunk, let pts):
-                    fputs("[bytes] \(chunk.count) @ \(pts)\n", stderr)
-                case .closed(let error):
-                    fputs("[capture] closed: \(error?.localizedDescription ?? "nil")\n", stderr)
+                case .opened(let openedFormat):
+                    // Finalize any previous writer before replacing it — a
+                    // device switch mid-recording fires .opened again, and
+                    // reusing the old file's name would silently overwrite
+                    // its audio.
+                    writer?.finalize()
+                    format = openedFormat
+                    let url = recordingsDirectory().appendingPathComponent("\(stamp(for: Date()))-mic.m4a")
+                    writer = try? AudioFileWriter(url: url, format: openedFormat)
+                case .bytes(let chunk, _):
+                    if let format {
+                        writer?.write(chunk, format: format)
+                    }
+                case .closed:
+                    writer?.finalize()
+                    writer = nil
+                    format = nil
                 }
             }
+            writer?.finalize()
         }
     }
+}
+
+private func recordingsDirectory() -> URL {
+    let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("MeetRecRecordings")
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
+}
+
+private func stamp(for date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyyMMddHHmmss"
+    return formatter.string(from: date)
 }
