@@ -5,21 +5,21 @@ import AppKit
 /// start/stop recording and quit.
 @MainActor
 final class StatusItemController: NSObject, NSMenuDelegate {
-    private let recordingState: RecordingStatusStore
+    private let pipeline: RecordingPipeline
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private var elapsedTimer: Timer?
     private var observeTask: Task<Void, Never>?
 
-    init(recordingState: RecordingStatusStore) {
-        self.recordingState = recordingState
+    init(pipeline: RecordingPipeline) {
+        self.pipeline = pipeline
         super.init()
         menu.delegate = self
         menu.autoenablesItems = false
         statusItem.menu = menu
         observeTask = Task { [weak self] in
             guard let self else { return }
-            for await status in recordingState.changes {
+            for await status in pipeline.changes {
                 self.apply(status)
             }
         }
@@ -31,7 +31,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
-        let isStarted = recordingState.status.startedAt != nil
+        let isStarted = pipeline.status.startedAt != nil
         let toggle = NSMenuItem(
             title: isStarted ? "Stop Recording" : "Start Recording",
             action: #selector(toggleRecording),
@@ -52,10 +52,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     // MARK: - Actions
 
     @objc private func toggleRecording() {
-        if recordingState.status.startedAt != nil {
-            recordingState.stop()
+        if pipeline.status.startedAt != nil {
+            pipeline.stop()
         } else {
-            recordingState.start()
+            pipeline.start()
         }
     }
 
@@ -65,7 +65,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     // MARK: - Status item button
 
-    private func apply(_ status: RecordingStatusStore.Status) {
+    private func apply(_ status: RecordingPipeline.Status) {
         updateButton(startedAt: status.startedAt)
         elapsedTimer?.invalidate()
         elapsedTimer = nil
