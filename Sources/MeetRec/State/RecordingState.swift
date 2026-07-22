@@ -1,13 +1,9 @@
 import Foundation
 
-/// Source of truth for whether a recording is running and since when. Not
-/// wired into the app yet — groundwork for moving state propagation onto
-/// async iterators.
+/// The start/stop recording state and its start timestamp.
 ///
 /// `changes` is multicast: every access returns an independent stream that
-/// yields the current status immediately (a late subscriber never misses the
-/// standing state), then every transition. Transitions are never dropped —
-/// buffering is unbounded, and elements are tiny and rare.
+/// yields the current status first, then every transition.
 @MainActor
 final class RecordingState {
     enum Status: Equatable {
@@ -23,22 +19,16 @@ final class RecordingState {
     private(set) var status: Status = .stopped
     private var subscribers: [UUID: AsyncStream<Status>.Continuation] = [:]
 
-    var isStarted: Bool { status != .stopped }
-    var startedAt: Date? { status.startedAt }
-
-    /// No-op when already started — the original start date is kept.
     func start(at date: Date = Date()) {
-        guard !isStarted else { return }
+        guard status == .stopped else { return }
         transition(to: .started(at: date))
     }
 
-    /// No-op when already stopped.
     func stop() {
-        guard isStarted else { return }
+        guard status != .stopped else { return }
         transition(to: .stopped)
     }
 
-    /// The current status, then every subsequent change.
     var changes: AsyncStream<Status> {
         let (stream, continuation) = AsyncStream.makeStream(of: Status.self)
         let id = UUID()
