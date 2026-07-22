@@ -5,7 +5,7 @@ import Foundation
 /// `changes` is multicast: every access returns an independent stream that
 /// yields the current status first, then every transition.
 @MainActor
-final class RecordingState {
+final class RecordingStateStore {
     enum Status: Equatable {
         case stopped
         case started(at: Date)

@@ -13,23 +13,19 @@ enum MeetRecMain {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let model = RecorderViewModel()
+    private let recordingState = RecordingStateStore()
     private var statusItemController: StatusItemController?
+    private var logTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // LSUIElement covers the assembled bundle; set the policy explicitly
         // so bare `swift run` is also windowless with no Dock icon.
         NSApp.setActivationPolicy(.accessory)
-        statusItemController = StatusItemController(model: model)
-    }
-
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard model.isRecording else { return .terminateNow }
-        // Finalize the recording files before allowing termination.
-        Task {
-            await model.stopRecording()
-            NSApp.reply(toApplicationShouldTerminate: true)
+        statusItemController = StatusItemController(recordingState: recordingState)
+        logTask = Task {
+            for await status in recordingState.changes {
+                fputs("[recording] \(status)\n", stderr)
+            }
         }
-        return .terminateLater
     }
 }

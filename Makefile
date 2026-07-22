@@ -19,14 +19,10 @@ app: build
 run: app
 	open $(APP)
 
-# Dev loop: run the bundled app attached to the terminal with the process's
-# unified-log output (os.Logger doesn't reach stdout) streaming alongside.
-# ⌃C — or quitting the app from its menu — stops both.
+# Dev loop: run the app binary directly (not via `open`) so it stays
+# attached to the terminal and its stderr shows up live. ⌃C, or Quit
+# MeetRec from the menu, stops it.
 dev: app
-	@echo "→ running $(APP) with live logs (⌃C or Quit MeetRec stops both)"
-	@log stream --level debug --style compact --predicate 'process == "MeetRec"' & \
-	LOG_PID=$$!; \
-	trap "kill $$LOG_PID 2>/dev/null" EXIT; \
 	$(APP)/Contents/MacOS/MeetRec
 
 clean:
