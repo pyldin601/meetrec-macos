@@ -40,6 +40,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         toggle.target = self
         menu.addItem(toggle)
 
+        let showRecordings = NSMenuItem(
+            title: "Show Recordings Folder",
+            action: #selector(showRecordingsFolder),
+            keyEquivalent: ""
+        )
+        showRecordings.target = self
+        menu.addItem(showRecordings)
+
         menu.addItem(.separator())
 
         // Our own selector, not NSApplication.terminate(_:) — macOS 26 auto-
@@ -57,6 +65,10 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         } else {
             pipeline.start()
         }
+    }
+
+    @objc private func showRecordingsFolder() {
+        NSWorkspace.shared.open(recordingsDirectory())
     }
 
     @objc private func quit(_ sender: Any?) {

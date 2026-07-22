@@ -79,7 +79,7 @@ final class RecordingPipeline {
     }
 }
 
-private func recordingsDirectory() -> URL {
+func recordingsDirectory() -> URL {
     let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("MeetRecRecordings")
     try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     return directory
