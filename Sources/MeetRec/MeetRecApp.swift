@@ -14,8 +14,10 @@ enum MeetRecMain {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let recordingState = RecordingStatusStore()
+    private let defaultInputDevice = DefaultInputDeviceStore()
     private var statusItemController: StatusItemController?
     private var logTask: Task<Void, Never>?
+    private var deviceLogTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // LSUIElement covers the assembled bundle; set the policy explicitly
@@ -25,6 +27,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         logTask = Task {
             for await status in recordingState.changes {
                 fputs("[recording] \(status)\n", stderr)
+            }
+        }
+        deviceLogTask = Task {
+            for await deviceID in defaultInputDevice.changes {
+                fputs("[default-input] \(deviceID.map { "\($0)" } ?? "none")\n", stderr)
             }
         }
     }
