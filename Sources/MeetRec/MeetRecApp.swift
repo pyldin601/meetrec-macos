@@ -13,7 +13,7 @@ enum MeetRecMain {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let recordingState = RecordingStateStore()
+    private let recordingState = RecordingStatusStore()
     private var statusItemController: StatusItemController?
     private var logTask: Task<Void, Never>?
 

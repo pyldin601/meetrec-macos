@@ -5,13 +5,13 @@ import AppKit
 /// start/stop recording and quit.
 @MainActor
 final class StatusItemController: NSObject, NSMenuDelegate {
-    private let recordingState: RecordingStateStore
+    private let recordingState: RecordingStatusStore
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private var elapsedTimer: Timer?
     private var observeTask: Task<Void, Never>?
 
-    init(recordingState: RecordingStateStore) {
+    init(recordingState: RecordingStatusStore) {
         self.recordingState = recordingState
         super.init()
         menu.delegate = self
@@ -65,7 +65,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     // MARK: - Status item button
 
-    private func apply(_ status: RecordingStateStore.Status) {
+    private func apply(_ status: RecordingStatusStore.Status) {
         updateButton(startedAt: status.startedAt)
         elapsedTimer?.invalidate()
         elapsedTimer = nil
