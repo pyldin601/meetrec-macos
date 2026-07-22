@@ -1,4 +1,5 @@
 import AppKit
+import CoreAudio
 
 @main
 @MainActor
@@ -16,7 +17,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let recordingState = RecordingStatusStore()
     private let defaultInputDevice = DefaultInputDeviceStore()
     private var statusItemController: StatusItemController?
-    private var logTask: Task<Void, Never>?
     private var deviceLogTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -24,13 +24,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // so bare `swift run` is also windowless with no Dock icon.
         NSApp.setActivationPolicy(.accessory)
         statusItemController = StatusItemController(recordingState: recordingState)
-        logTask = Task {
-            for await status in recordingState.changes {
-                fputs("[recording] \(status)\n", stderr)
-            }
-        }
+        // switchMap: only logs while recording is active, switching to the
+        // idle stream (and cancelling the prior one) on every status change.
         deviceLogTask = Task {
-            for await deviceID in defaultInputDevice.changes {
+            let loggedWhileRecording = recordingState.changes.flatMapLatest { status in
+                status == .stopped
+                    ? AsyncStream<AudioDeviceID?> { $0.finish() }
+                    : self.defaultInputDevice.changes
+            }
+            for await deviceID in loggedWhileRecording {
                 fputs("[default-input] \(deviceID.map { "\($0)" } ?? "none")\n", stderr)
             }
         }
