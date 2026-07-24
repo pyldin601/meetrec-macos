@@ -16,6 +16,13 @@ final class RecordingController {
         status != .stopped
     }
 
+    var recordingTime: UInt64 {
+        switch status {
+        case .stopped: 0
+        case .started(at: let startedAt): UInt64(startedAt.distance(to: Date()))
+        }
+    }
+
     func toggle() {
         switch status {
         case .started:

@@ -16,6 +16,14 @@ enum MeetRecMain {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let recordingController = RecordingController()
 
+    private var timer: Timer?
+
+    private var recordingTimeLabel: String {
+        let m = recordingController.recordingTime / 60
+        let s = recordingController.recordingTime % 60
+        return String(format: "%d:%02d", m, s)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
     }
 
@@ -37,9 +45,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func startRecording() {
         recordingController.startRecording()
+        updateRecordingTimeLabel()
+
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.updateRecordingTimeLabel()
+            }
+        }
     }
 
     @objc func stopRecording() {
         recordingController.stopRecording()
+
+        timer?.invalidate()
+        updateRecordingTimeLabel()
+    }
+
+    private func updateRecordingTimeLabel() {
+        guard .stopped != recordingController.status else {
+            NSApp.dockTile.badgeLabel = nil
+            return
+        }
+
+        let m = recordingController.recordingTime / 60
+        let s = recordingController.recordingTime % 60
+        let label = String(format: "%d:%02d", m, s)
+        NSApp.dockTile.badgeLabel = label
     }
 }
