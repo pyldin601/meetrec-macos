@@ -8,9 +8,15 @@ let package = Package(
         // early tap bugs and matches Apple's AudioCap sample baseline.
         .macOS("14.4")
     ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-log", from: "1.6.0")
+    ],
     targets: [
         .executableTarget(
             name: "MeetRec",
+            dependencies: [
+                .product(name: "Logging", package: "swift-log")
+            ],
             linkerSettings: [
                 // Embed Info.plist into the bare binary so `swift run` gets
                 // the same app identity (and, later, usage descriptions) as

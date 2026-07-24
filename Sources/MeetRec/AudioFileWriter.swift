@@ -1,4 +1,8 @@
 import AVFoundation
+import Logging
+
+// Create a logger
+let logger = Logger(label: "xyz.pyldin601.MeetRec.AudioFileWriter")
 
 /// Writes captured audio bytes to an AAC (.m4a) file.
 final class AudioFileWriter {
@@ -8,9 +12,9 @@ final class AudioFileWriter {
     private var wroteFrames = false
 
     init(url: URL, format: AVAudioFormat) throws {
-        self.url = url
+        self.url = url.appendingPathExtension("m4a")
         file = try AVAudioFile(
-            forWriting: url,
+            forWriting: self.url,
             settings: [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
                 AVSampleRateKey: format.sampleRate,
@@ -20,6 +24,7 @@ final class AudioFileWriter {
             commonFormat: format.commonFormat,
             interleaved: format.isInterleaved
         )
+        logger.info("File created", metadata: ["file": "\(self.url)"]);
     }
 
     /// Writes one chunk of raw bytes, as captured in `format` (the format
@@ -28,29 +33,25 @@ final class AudioFileWriter {
         guard let file, let buffer = pcmBuffer(from: bytes, format: format) else { return }
         do {
             try file.write(from: buffer)
+            logger.debug("Bytes written", metadata: ["len": "\(bytes.count)"])
             wroteFrames = true
         } catch {
             // Best-effort: one bad chunk shouldn't end the whole recording.
         }
     }
 
-    /// Closes the file (the M4A header is finalized when the AVAudioFile is
-    /// released). A file that captured nothing is deleted.
-    func finalize() {
-        file = nil
-        deleteIfEmpty()
-    }
-
     /// Same cleanup as `finalize()`, so a writer that's just dropped (e.g.
     /// replaced by a new one on a device switch) without an explicit
     /// finalize() call still doesn't leave an empty file behind.
     deinit {
+        logger.info("Finalizing file", metadata: ["file": "\(self.url)"])
         deleteIfEmpty()
     }
 
     private func deleteIfEmpty() {
         guard !wroteFrames else { return }
         try? FileManager.default.removeItem(at: url)
+        logger.info("Empty file deleted", metadata: ["file": "\(self.url)"]);
     }
 }
 
