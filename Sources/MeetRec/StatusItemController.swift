@@ -5,24 +5,17 @@ import AppKit
 /// start/stop recording and quit.
 @MainActor
 final class StatusItemController: NSObject, NSMenuDelegate {
-    private let pipeline: RecordingPipeline
+    private let controller: RecordingController
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let menu = NSMenu()
     private var elapsedTimer: Timer?
-    private var observeTask: Task<Void, Never>?
 
-    init(pipeline: RecordingPipeline) {
-        self.pipeline = pipeline
+    init(controller: RecordingController) {
+        self.controller = controller
         super.init()
         menu.delegate = self
         menu.autoenablesItems = false
         statusItem.menu = menu
-        observeTask = Task { [weak self] in
-            guard let self else { return }
-            for await status in pipeline.changes {
-                self.apply(status)
-            }
-        }
     }
 
     // MARK: - Menu
@@ -31,40 +24,36 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
-        let isStarted = pipeline.status.startedAt != nil
-        let toggle = NSMenuItem(
-            title: isStarted ? "Stop Recording" : "Start Recording",
-            action: #selector(toggleRecording),
-            keyEquivalent: ""
-        )
-        toggle.target = self
-        menu.addItem(toggle)
-
-        let showRecordings = NSMenuItem(
-            title: "Show Recordings Folder",
-            action: #selector(showRecordingsFolder),
-            keyEquivalent: ""
-        )
-        showRecordings.target = self
-        menu.addItem(showRecordings)
-
-        menu.addItem(.separator())
-
-        // Our own selector, not NSApplication.terminate(_:) — macOS 26 auto-
-        // decorates well-known actions with icons, and Quit should have none.
-        let quit = NSMenuItem(title: "Quit MeetRec", action: #selector(quit(_:)), keyEquivalent: "q")
-        quit.target = self
-        menu.addItem(quit)
+//        let isStarted = controller.isStarted
+//        let toggle = NSMenuItem(
+//            title: isStarted ? "Stop Recording" : "Start Recording",
+//            action: #selector(toggleRecording),
+//            keyEquivalent: ""
+//        )
+//        toggle.target = self
+//        menu.addItem(toggle)
+//
+//        let showRecordings = NSMenuItem(
+//            title: "Show Recordings Folder",
+//            action: #selector(showRecordingsFolder),
+//            keyEquivalent: ""
+//        )
+//        showRecordings.target = self
+//        menu.addItem(showRecordings)
+//
+//        menu.addItem(.separator())
+//
+//        // Our own selector, not NSApplication.terminate(_:) — macOS 26 auto-
+//        // decorates well-known actions with icons, and Quit should have none.
+//        let quit = NSMenuItem(title: "Quit MeetRec", action: #selector(quit(_:)), keyEquivalent: "q")
+//        quit.target = self
+//        menu.addItem(quit)
     }
 
     // MARK: - Actions
 
     @objc private func toggleRecording() {
-        if pipeline.status.startedAt != nil {
-            pipeline.stop()
-        } else {
-            pipeline.start()
-        }
+        controller.toggle()
     }
 
     @objc private func showRecordingsFolder() {
@@ -77,18 +66,18 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     // MARK: - Status item button
 
-    private func apply(_ status: RecordingPipeline.Status) {
-        updateButton(startedAt: status.startedAt)
-        elapsedTimer?.invalidate()
-        elapsedTimer = nil
-        guard let startedAt = status.startedAt else { return }
-        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.updateButton(startedAt: startedAt) }
-        }
-        // .common keeps the clock ticking while the menu is open.
-        RunLoop.main.add(timer, forMode: .common)
-        elapsedTimer = timer
-    }
+//    private func apply(_ status: RecordingController.Status) {
+//        updateButton(startedAt: status.startedAt)
+//        elapsedTimer?.invalidate()
+//        elapsedTimer = nil
+//        guard let startedAt = status.startedAt else { return }
+//        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+//            MainActor.assumeIsolated { self?.updateButton(startedAt: startedAt) }
+//        }
+//        // .common keeps the clock ticking while the menu is open.
+//        RunLoop.main.add(timer, forMode: .common)
+//        elapsedTimer = timer
+//    }
 
     private func updateButton(startedAt: Date?) {
         guard let button = statusItem.button else { return }
