@@ -20,16 +20,9 @@ final class RecordingController {
     var recordingTime: UInt64 {
         switch status {
         case .stopped: 0
-        case .started(at: let startedAt): UInt64(startedAt.distance(to: Date()))
-        }
-    }
-
-    func toggle() {
-        switch status {
-        case .started:
-            stopRecording()
-        case .stopped:
-            startRecording()
+        // Clamp to 0: a backward system clock adjustment would otherwise make
+        // this negative and crash the trapping UInt64 conversion.
+        case .started(at: let startedAt): UInt64(max(0, startedAt.distance(to: Date())))
         }
     }
 
@@ -70,7 +63,9 @@ final class RecordingController {
                 }
 
                 let interval = startedAt.distance(to: Date())
-                let intervalMillis = UInt64(interval * 1000)
+                // Clamp to 0: a backward system clock adjustment would otherwise make
+                // this negative and crash the trapping UInt64 conversion.
+                let intervalMillis = UInt64(max(0, interval * 1000))
 
                 createDeviceRecordingTask(at: startedAt, forDeviceID: deviceID, forOffset: intervalMillis)
             }
@@ -120,7 +115,7 @@ final class RecordingController {
                 }
                 writer = nil
             } catch {
-                print("Failed to create recording task", error)
+                notifyRecordingFailure(error, for: .device)
             }
         }
     }
@@ -166,7 +161,7 @@ final class RecordingController {
                 }
                 writer = nil
             } catch {
-                print("Failed to create recording task", error)
+                notifyRecordingFailure(error, for: .system)
             }
         }
     }
