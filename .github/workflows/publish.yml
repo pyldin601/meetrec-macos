@@ -1,0 +1,40 @@
+name: Build and Publish
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    strategy:
+      matrix:
+        arch: [arm64, x86_64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app bundle (${{ matrix.arch }})
+        run: make app ARCH=${{ matrix.arch }}
+
+      - name: Zip app bundle
+        run: |
+          cd dist
+          zip -ry MeetRec-${{ matrix.arch }}.app.zip MeetRec-${{ matrix.arch }}.app
+
+      - name: Install oras
+        uses: oras-project/setup-oras@v1
+
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Publish to GitHub Packages
+        run: |
+          oras push ghcr.io/${{ github.repository }}:${{ matrix.arch }} \
+            --artifact-type application/vnd.meetrec.app-bundle \
+            dist/MeetRec-${{ matrix.arch }}.app.zip:application/zip

@@ -1,6 +1,7 @@
 CONFIG ?= release
-APP := dist/MeetRec.app
-BIN = $(shell swift build -c $(CONFIG) --show-bin-path)/MeetRec
+ARCH ?= $(shell uname -m)
+APP := dist/MeetRec-$(ARCH).app
+BIN = $(shell swift build -c $(CONFIG) --arch $(ARCH) --show-bin-path)/MeetRec
 
 APP_ICON_PNG := Sources/MeetRec/Resources/AppIcon.png
 APP_ICON_ICNS := Sources/MeetRec/Resources/AppIcon.icns
@@ -8,7 +9,7 @@ APP_ICON_ICNS := Sources/MeetRec/Resources/AppIcon.icns
 .PHONY: build app run dev icns clean
 
 build:
-	swift build -c $(CONFIG)
+	swift build -c $(CONFIG) --arch $(ARCH)
 
 app: build
 	rm -rf $(APP)
