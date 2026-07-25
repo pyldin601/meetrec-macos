@@ -26,15 +26,6 @@ final class RecordingController {
         }
     }
 
-    func toggle() {
-        switch status {
-        case .started:
-            stopRecording()
-        case .stopped:
-            startRecording()
-        }
-    }
-
     func startRecording() {
         guard status == .stopped else {
             return
