@@ -141,7 +141,7 @@ private func microseconds(fromHostTime hostTime: UInt64) -> UInt64 {
 /// gap-filling is done here, so the stream is not guaranteed wall-clock
 /// continuous. Each chunk's `pts` lets a consumer detect such gaps itself.
 func captureSystemAudio() throws -> AsyncStream<CaptureEvent> {
-    let ioQueue = DispatchQueue(label: "dev.roman.MeetRec.process-tap")
+    let ioQueue = DispatchQueue(label: "xyz.pyldin601.MeetRec.process-tap")
 
     var exclude: [AudioObjectID] = []
     if let own = processObject(forPID: ProcessInfo.processInfo.processIdentifier) {
