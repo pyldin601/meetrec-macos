@@ -115,7 +115,7 @@ final class RecordingController {
                 }
                 writer = nil
             } catch {
-                print("Failed to create recording task", error)
+                notifyRecordingFailure(error, for: .device)
             }
         }
     }
@@ -161,7 +161,7 @@ final class RecordingController {
                 }
                 writer = nil
             } catch {
-                print("Failed to create recording task", error)
+                notifyRecordingFailure(error, for: .system)
             }
         }
     }

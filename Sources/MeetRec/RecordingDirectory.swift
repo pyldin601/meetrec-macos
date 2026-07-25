@@ -12,6 +12,13 @@ enum RecordingInput {
             case .system: "system"
         }
     }
+
+    var displayName: String {
+        switch self {
+            case .device: "microphone"
+            case .system: "system audio"
+        }
+    }
 }
 
 func getRecordingsDirectoryURL() -> URL {
