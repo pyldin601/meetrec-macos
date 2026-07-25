@@ -37,8 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = !recordingController.isRecording
             ? NSMenuItem(title: "Start Recording", action: #selector(startRecording), keyEquivalent: "")
             : NSMenuItem(title: "Stop Recording", action: #selector(stopRecording), keyEquivalent: "")
-
         menu.addItem(item)
+
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Open Recordings Folder", action: #selector(openRecordingsFolder), keyEquivalent: ""))
 
         return menu
     }
@@ -60,6 +62,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         timer?.invalidate()
         updateRecordingTimeLabel()
+    }
+
+    @objc func openRecordingsFolder() {
+        NSWorkspace.shared.open(getRecordingsDirectoryURL())
     }
 
     private func updateRecordingTimeLabel() {

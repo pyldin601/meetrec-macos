@@ -14,27 +14,24 @@ enum RecordingInput {
     }
 }
 
+func getRecordingsDirectoryURL() -> URL {
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    return home.appendingPathComponent(RECORDINGS_FOLDER)
+}
+
+func getRecordingDirectoryURL(date: Date) -> URL {
+    let recordings = getRecordingsDirectoryURL()
+    let recordingForDate = recordings.appendingPathComponent(stamp(for: date))
+
+    return recordingForDate
+}
+
 func getRecordingFileURL(forInput: RecordingInput, withDate date: Date, withOffset offset: UInt64) -> URL {
     let directory = getRecordingDirectoryURL(date: date)
     let filename = "\(stamp(for: date))-\(offset)-\(forInput.suffix)"
 
     return directory.appendingPathComponent(filename)
 }
-
-func getRecordingDirectoryURL(date: Date) -> URL {
-    let home = FileManager.default.homeDirectoryForCurrentUser
-    let recordings = home.appendingPathComponent(RECORDINGS_FOLDER)
-    let recordingForDate = recordings.appendingPathComponent(stamp(for: date))
-
-    return recordingForDate
-}
-
-
-//func recordingsDirectory() -> URL {
-//    let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("MeetRecRecordings")
-//    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-//    return directory
-//}
 
 private func stamp(for date: Date) -> String {
     let formatter = DateFormatter()
