@@ -9,6 +9,7 @@ final class RecordingController {
 
     private var deviceChangeTask: Task<(), Never>?
     private var deviceRecordingTask: Task<(), Never>?
+    private var systemRecordingTask: Task<(), Never>?
 
     private(set) var status: Status = .stopped
 
@@ -40,6 +41,7 @@ final class RecordingController {
         let date = Date()
 
         createDeviceChangeTask(at: date)
+        createSystemRecordingTask(at: date)
 
         status = .started(at: date)
     }
@@ -49,7 +51,8 @@ final class RecordingController {
             return
         }
 
-        deviceChangeTask?.cancel()
+        cancelDeviceChangeTask()
+        cancelSystemRecordingTask()
 
         status = .stopped
     }
@@ -125,5 +128,51 @@ final class RecordingController {
     private func cancelDeviceRecordingTask() {
         deviceRecordingTask?.cancel()
         deviceRecordingTask = nil
+    }
+
+    private func createSystemRecordingTask(at startedAt: Date) {
+        cancelSystemRecordingTask()
+
+        systemRecordingTask = Task {
+            let directoryURL = getRecordingDirectoryURL(date: startedAt)
+            let fileURL = getRecordingFileURL(
+                forInput: RecordingInput.system,
+                withDate: startedAt,
+                withOffset: 0,
+            )
+
+            do {
+                try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+
+                let stream = try captureSystemAudio()
+                var writer: AudioFileWriter?
+                var format: AVAudioFormat?
+
+                for await event in stream {
+                    switch event {
+                    case .opened(let openedFormat):
+                        format = openedFormat
+                        writer = try AudioFileWriter(url: fileURL, format: openedFormat)
+
+                    case .bytes(let chunk, _):
+                        if let format {
+                            writer?.write(chunk, format: format)
+                        }
+
+                    case .closed:
+                        writer = nil
+                        format = nil
+                    }
+                }
+                writer = nil
+            } catch {
+                print("Failed to create recording task", error)
+            }
+        }
+    }
+
+    private func cancelSystemRecordingTask() {
+        systemRecordingTask?.cancel()
+        systemRecordingTask = nil
     }
 }
