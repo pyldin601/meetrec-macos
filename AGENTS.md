@@ -1,9 +1,10 @@
 # AGENTS.md
 
-MeetRec — a macOS menu bar utility that records meeting audio. Being rebuilt
-step by step on this branch; a complete reference implementation lives on the
-`claude/macos-meeting-audio-recorder-7ro5zl` branch — use it for inspiration,
-not wholesale copying.
+MeetRec — a macOS Dock-icon utility that records meeting audio, controlled
+from its Dock icon's right-click menu (no status-bar/menu-bar icon). Being
+rebuilt step by step on this branch; a complete reference implementation
+lives on the `claude/macos-meeting-audio-recorder-7ro5zl` branch — use it for
+inspiration, not wholesale copying.
 
 ## Build & verify
 
