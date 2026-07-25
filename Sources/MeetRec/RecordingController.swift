@@ -87,7 +87,7 @@ final class RecordingController {
             let fileURL = getRecordingFileURL(
                 forInput: RecordingInput.device,
                 withDate: startedAt,
-                withOffset: offset,
+                withOffset: offset
             )
 
             do {
@@ -133,7 +133,7 @@ final class RecordingController {
             let fileURL = getRecordingFileURL(
                 forInput: RecordingInput.system,
                 withDate: startedAt,
-                withOffset: 0,
+                withOffset: 0
             )
 
             do {

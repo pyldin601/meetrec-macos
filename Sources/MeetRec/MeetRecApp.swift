@@ -47,8 +47,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateRecordingTimeLabel()
 
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self else { return }
             Task { @MainActor in
-                guard let self else { return }
                 self.updateRecordingTimeLabel()
             }
         }
