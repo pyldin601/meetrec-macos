@@ -25,8 +25,22 @@ func defaultInputDeviceIDs() -> AsyncStream<AudioDeviceID?> {
             label: "default-input-device-listener"
         )
 
+        // Some drivers fire the change notification even when the resolved
+        // default device hasn't actually changed; track the last emitted ID
+        // so those spurious notifications don't retrigger consumers.
+        var hasEmitted = false
+        var lastDeviceID: AudioDeviceID?
+
+        func emitIfChanged() {
+            let currentID = defaultInputDeviceID()
+            guard !hasEmitted || currentID != lastDeviceID else { return }
+            hasEmitted = true
+            lastDeviceID = currentID
+            continuation.yield(currentID)
+        }
+
         let listener: AudioObjectPropertyListenerBlock = { _, _ in
-            continuation.yield(defaultInputDeviceID())
+            emitIfChanged()
         }
 
         let status = AudioObjectAddPropertyListenerBlock(
@@ -41,8 +55,11 @@ func defaultInputDeviceIDs() -> AsyncStream<AudioDeviceID?> {
             return
         }
 
-        // Emit the initial value.
-        continuation.yield(defaultInputDeviceID())
+        // Emit the initial value. Dispatched onto `queue` (instead of called
+        // inline) so it's serialized with the listener callback, which
+        // CoreAudio also invokes on `queue` — otherwise the dedup state above
+        // could race between this call and a concurrent listener callback.
+        queue.async { emitIfChanged() }
 
         continuation.onTermination = { @Sendable _ in
             var removalAddress = getDefaultInputDeviceAddress()
