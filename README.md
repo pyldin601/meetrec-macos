@@ -1,2 +1,2 @@
 # meetrec-macos
-A native macOS CLI for capturing application and microphone audio using ScreenCaptureKit.
+A native macOS Dock-icon utility that records microphone and system audio during meetings via CoreAudio process taps.
