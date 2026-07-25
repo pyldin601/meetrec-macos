@@ -17,6 +17,8 @@ let package = Package(
             dependencies: [
                 .product(name: "Logging", package: "swift-log")
             ],
+            // App icon is copied into MeetRec.app by the Makefile, not SPM.
+            exclude: ["Resources"],
             linkerSettings: [
                 // Embed Info.plist into the bare binary so `swift run` gets
                 // the same app identity (and, later, usage descriptions) as
