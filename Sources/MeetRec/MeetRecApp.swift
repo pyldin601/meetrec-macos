@@ -18,12 +18,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var timer: Timer?
 
-    private var recordingTimeLabel: String {
-        let m = recordingController.recordingTime / 60
-        let s = recordingController.recordingTime % 60
-        return String(format: "%d:%02d", m, s)
-    }
-
     func applicationDidFinishLaunching(_ notification: Notification) {
     }
 
