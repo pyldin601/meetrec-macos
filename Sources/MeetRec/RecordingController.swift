@@ -2,172 +2,174 @@ import AVFoundation
 
 @MainActor
 final class RecordingController {
-    enum Status: Equatable {
-        case started(at: Date)
-        case stopped
+  enum Status: Equatable {
+    case started(at: Date)
+    case stopped
+  }
+
+  private var deviceChangeTask: Task<(), Never>?
+  private var deviceRecordingTask: Task<(), Never>?
+  private var systemRecordingTask: Task<(), Never>?
+
+  private(set) var status: Status = .stopped
+
+  var isRecording: Bool {
+    status != .stopped
+  }
+
+  var recordingTime: UInt64 {
+    switch status {
+    case .stopped: 0
+    // Clamp to 0: a backward system clock adjustment would otherwise make
+    // this negative and crash the trapping UInt64 conversion.
+    case .started(at: let startedAt): UInt64(max(0, startedAt.distance(to: Date())))
+    }
+  }
+
+  func startRecording() {
+    guard status == .stopped else {
+      return
     }
 
-    private var deviceChangeTask: Task<(), Never>?
-    private var deviceRecordingTask: Task<(), Never>?
-    private var systemRecordingTask: Task<(), Never>?
+    let date = Date()
 
-    private(set) var status: Status = .stopped
+    createDeviceChangeTask(at: date)
+    createSystemRecordingTask(at: date)
 
-    var isRecording: Bool {
-        status != .stopped
+    status = .started(at: date)
+  }
+
+  func stopRecording() {
+    guard case .started(at: _) = status else {
+      return
     }
 
-    var recordingTime: UInt64 {
-        switch status {
-        case .stopped: 0
+    cancelDeviceChangeTask()
+    cancelSystemRecordingTask()
+
+    status = .stopped
+  }
+
+  private func createDeviceChangeTask(at startedAt: Date) {
+    cancelDeviceChangeTask()
+
+    deviceChangeTask = Task {
+      for await deviceID in defaultInputDeviceIDs() {
+        cancelDeviceRecordingTask()
+
+        guard let deviceID else {
+          // Can't find default input device
+          continue
+        }
+
+        let interval = startedAt.distance(to: Date())
         // Clamp to 0: a backward system clock adjustment would otherwise make
         // this negative and crash the trapping UInt64 conversion.
-        case .started(at: let startedAt): UInt64(max(0, startedAt.distance(to: Date())))
-        }
+        let intervalMillis = UInt64(max(0, interval * 1000))
+
+        createDeviceRecordingTask(at: startedAt, forDeviceID: deviceID, forOffset: intervalMillis)
+      }
+
+      cancelDeviceRecordingTask()
     }
+  }
 
-    func startRecording() {
-        guard status == .stopped else {
-            return
-        }
+  private func cancelDeviceChangeTask() {
+    deviceChangeTask?.cancel()
+    deviceChangeTask = nil
+  }
 
-        let date = Date()
+  private func createDeviceRecordingTask(
+    at startedAt: Date, forDeviceID deviceID: AudioDeviceID, forOffset offset: UInt64
+  ) {
+    deviceRecordingTask?.cancel()
 
-        createDeviceChangeTask(at: date)
-        createSystemRecordingTask(at: date)
+    deviceRecordingTask = Task {
+      let directoryURL = getRecordingDirectoryURL(date: startedAt)
+      let fileURL = getRecordingFileURL(
+        forInput: RecordingInput.device,
+        withDate: startedAt,
+        withOffset: offset
+      )
 
-        status = .started(at: date)
-    }
+      do {
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
 
-    func stopRecording() {
-        guard case .started(at: _) = status else {
-            return
-        }
+        let stream = try captureFromDevice(deviceID)
+        var writer: AudioFileWriter?
+        var format: AVAudioFormat?
 
-        cancelDeviceChangeTask()
-        cancelSystemRecordingTask()
+        for await event in stream {
+          switch event {
+          case .opened(let openedFormat):
+            format = openedFormat
+            writer = try AudioFileWriter(url: fileURL, format: openedFormat)
 
-        status = .stopped
-    }
-
-    private func createDeviceChangeTask(at startedAt: Date)  {
-        cancelDeviceChangeTask()
-
-        deviceChangeTask = Task {
-            for await deviceID in defaultInputDeviceIDs() {
-                cancelDeviceRecordingTask()
-
-                guard let deviceID else {
-                    // Can't find default input device
-                    continue
-                }
-
-                let interval = startedAt.distance(to: Date())
-                // Clamp to 0: a backward system clock adjustment would otherwise make
-                // this negative and crash the trapping UInt64 conversion.
-                let intervalMillis = UInt64(max(0, interval * 1000))
-
-                createDeviceRecordingTask(at: startedAt, forDeviceID: deviceID, forOffset: intervalMillis)
+          case .bytes(let chunk, _):
+            if let format {
+              writer?.write(chunk, format: format)
             }
 
-            cancelDeviceRecordingTask()
+          case .closed:
+            writer = nil
+            format = nil
+          }
         }
+        writer = nil
+      } catch {
+        print("Failed to create recording task", error)
+      }
     }
+  }
 
-    private func cancelDeviceChangeTask() {
-        deviceChangeTask?.cancel()
-        deviceChangeTask = nil
-    }
+  private func cancelDeviceRecordingTask() {
+    deviceRecordingTask?.cancel()
+    deviceRecordingTask = nil
+  }
 
-    private func createDeviceRecordingTask(at startedAt: Date, forDeviceID deviceID: AudioDeviceID, forOffset offset: UInt64) {
-        deviceRecordingTask?.cancel()
+  private func createSystemRecordingTask(at startedAt: Date) {
+    cancelSystemRecordingTask()
 
-        deviceRecordingTask = Task {
-            let directoryURL = getRecordingDirectoryURL(date: startedAt)
-            let fileURL = getRecordingFileURL(
-                forInput: RecordingInput.device,
-                withDate: startedAt,
-                withOffset: offset
-            )
+    systemRecordingTask = Task {
+      let directoryURL = getRecordingDirectoryURL(date: startedAt)
+      let fileURL = getRecordingFileURL(
+        forInput: RecordingInput.system,
+        withDate: startedAt,
+        withOffset: 0
+      )
 
-            do {
-                try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+      do {
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
 
-                let stream = try captureFromDevice(deviceID)
-                var writer: AudioFileWriter?
-                var format: AVAudioFormat?
+        let stream = try captureSystemAudio()
+        var writer: AudioFileWriter?
+        var format: AVAudioFormat?
 
-                for await event in stream {
-                    switch event {
-                    case .opened(let openedFormat):
-                        format = openedFormat
-                        writer = try AudioFileWriter(url: fileURL, format: openedFormat)
+        for await event in stream {
+          switch event {
+          case .opened(let openedFormat):
+            format = openedFormat
+            writer = try AudioFileWriter(url: fileURL, format: openedFormat)
 
-                    case .bytes(let chunk, _):
-                        if let format {
-                            writer?.write(chunk, format: format)
-                        }
-
-                    case .closed:
-                        writer = nil
-                        format = nil
-                    }
-                }
-                writer = nil
-            } catch {
-                print("Failed to create recording task", error)
+          case .bytes(let chunk, _):
+            if let format {
+              writer?.write(chunk, format: format)
             }
+
+          case .closed:
+            writer = nil
+            format = nil
+          }
         }
+        writer = nil
+      } catch {
+        print("Failed to create recording task", error)
+      }
     }
+  }
 
-    private func cancelDeviceRecordingTask() {
-        deviceRecordingTask?.cancel()
-        deviceRecordingTask = nil
-    }
-
-    private func createSystemRecordingTask(at startedAt: Date) {
-        cancelSystemRecordingTask()
-
-        systemRecordingTask = Task {
-            let directoryURL = getRecordingDirectoryURL(date: startedAt)
-            let fileURL = getRecordingFileURL(
-                forInput: RecordingInput.system,
-                withDate: startedAt,
-                withOffset: 0
-            )
-
-            do {
-                try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-
-                let stream = try captureSystemAudio()
-                var writer: AudioFileWriter?
-                var format: AVAudioFormat?
-
-                for await event in stream {
-                    switch event {
-                    case .opened(let openedFormat):
-                        format = openedFormat
-                        writer = try AudioFileWriter(url: fileURL, format: openedFormat)
-
-                    case .bytes(let chunk, _):
-                        if let format {
-                            writer?.write(chunk, format: format)
-                        }
-
-                    case .closed:
-                        writer = nil
-                        format = nil
-                    }
-                }
-                writer = nil
-            } catch {
-                print("Failed to create recording task", error)
-            }
-        }
-    }
-
-    private func cancelSystemRecordingTask() {
-        systemRecordingTask?.cancel()
-        systemRecordingTask = nil
-    }
+  private func cancelSystemRecordingTask() {
+    systemRecordingTask?.cancel()
+    systemRecordingTask = nil
+  }
 }
