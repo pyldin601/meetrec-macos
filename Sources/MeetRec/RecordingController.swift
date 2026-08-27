@@ -1,4 +1,5 @@
 import AVFoundation
+import AppKit
 
 @MainActor
 final class RecordingController {
@@ -104,6 +105,7 @@ final class RecordingController {
           case .opened(let openedFormat):
             format = openedFormat
             writer = try AudioFileWriter(url: fileURL, format: openedFormat)
+            NSSound.beep()
 
           case .bytes(let chunk, _):
             if let format {
